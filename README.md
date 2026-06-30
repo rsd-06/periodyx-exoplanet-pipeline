@@ -380,31 +380,54 @@ the root cause identified in Section 7 and is an open item, not yet fixed.
 
 ## 10. How to Run This
 
-**Mechanical sanity check (no real data, seconds to run):**
+### Step 0: Get the Data
+Before running the pipeline, you need the label source (`data/koi_cumulative.csv`), which tells the project whether a star is a confirmed planet or a false positive. It is not included in the repository because it's pulled live from NASA. 
+
+Download it by visiting this URL in a browser or using a tool like `curl`:
+[NASA Exoplanet Archive Data](https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+kepid,kepoi_name,koi_disposition,koi_fpflag_nt,koi_fpflag_ss,koi_fpflag_co,koi_fpflag_ec,koi_period,koi_duration,koi_depth,koi_prad+from+cumulative&format=csv)
+
+Save the result as `data/koi_cumulative.csv` inside your project folder.
+
+### Step 1: Mechanical Sanity Check
+Install the required libraries and run a self-contained test on fake data. This checks that your environment is set up correctly (engine starts) before downloading real data.
+
 ```bash
 pip install -r requirements.txt
 python3 scripts/dry_run_test.py
 ```
+*Run this first! If it fails, something is wrong with your environment.*
 
-**Calibrate the BLS→TLS threshold on real data:**
+### Step 2: Calibrate the Detection Threshold
+Determine the cutoff score for "interesting signals" vs. "pure noise". This script scrambles real data to establish a noise baseline and suggests a safe threshold number.
+
 ```bash
 python3 scripts/calibrate_threshold.py --koi-csv data/koi_cumulative.csv --sample 150
 ```
+*It prints a recommended threshold number at the end, which you'll need for Step 3.*
 
-**Build the training feature set (slow, CPU-bound, resumable):**
+### Step 3: Build the Training Dataset
+This is the heavy-lifting step. It downloads real light curves for every star, runs them through the pipeline, and builds a table of measurements for the classifier.
+
 ```bash
 python3 scripts/build_training_set.py \
     --koi-csv data/koi_cumulative.csv \
     --bls-threshold <value from calibration step> \
     --workers 8
 ```
+- `--bls-threshold`: Replace `<value from calibration step>` with the number printed in Step 2.
+- `--workers`: Processes multiple stars in parallel. Set this to the number of CPU cores on your machine.
 
-**Train and evaluate the classifier (fast, seconds):**
+*Note: This step can take hours depending on the number of stars.*
+
+### Step 4: Train the Classifier
+Teach the model to recognize patterns in the data prepared in Step 3. Since the heavy lifting is done, this step only takes seconds.
+
 ```bash
 python3 scripts/train_classifier.py \
     --features data/training_features.csv \
     --model-out models/exoplanet_classifier.joblib
 ```
+*It saves the trained model as a `.joblib` file so you can reuse it without retraining, and prints a performance report.*
 
 ---
 
