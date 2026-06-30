@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+data/
+demo_outputs/
+*.csv
+*.joblib
+.pytest_cache/

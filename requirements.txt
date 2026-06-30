@@ -1,0 +1,11 @@
+astropy
+joblib
+lmfit
+matplotlib
+numpy
+pandas
+scikit-learn
+scipy
+transitleastsquares
+wotan
+xgboost
