@@ -46,8 +46,9 @@ FIELDNAMES = [
     "ingress_fraction", "period", "detection_significance",
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
-    # v3: NASA vetting flags (zero compute cost — already in KOI table)
-    "fpflag_nt", "fpflag_ss", "fpflag_co", "fpflag_ec", "koi_prad",
+    # v3: koi_prad only — fpflag_nt/ss/co/ec are EXCLUDED because they are
+    # the direct source used to assign labels (data leakage if used as features).
+    "koi_prad",
 ]
 
 
@@ -103,19 +104,13 @@ def main():
     remaining = labels_df[~labels_df["kepid"].astype(str).isin(done)]
     print(f"{len(done)} stars already processed, {len(remaining)} remaining.")
 
-    # KOI flag columns to carry through to features (already computed by NASA)
-    flag_cols = ["koi_fpflag_nt", "koi_fpflag_ss", "koi_fpflag_co",
-                 "koi_fpflag_ec", "koi_prad"]
-
+    # koi_prad is the only KOI-table column carried through to features.
+    # fpflag_nt/ss/co/ec are excluded — they are the label source (data leakage).
     tasks = [
         (
             row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold,
             {
-                "fpflag_nt": getattr(row, "koi_fpflag_nt", None),
-                "fpflag_ss": getattr(row, "koi_fpflag_ss", None),
-                "fpflag_co": getattr(row, "koi_fpflag_co", None),
-                "fpflag_ec": getattr(row, "koi_fpflag_ec", None),
-                "koi_prad":  getattr(row, "koi_prad",  None),
+                "koi_prad": getattr(row, "koi_prad", None),
             }
         )
         for row in remaining.itertuples()

@@ -39,21 +39,18 @@ FEATURE_COLUMNS_V2 = [
     "depth_snr", "n_signals_detected", "period_corrected",
 ]
 
-# ── v3 additions: NASA vetting flags ────────────────────────────────────────
-# What each flag means (NASA computed, zero extra compute):
-#   fpflag_co  = centroid offset flag  — flux centroid shifts during transit,
-#                meaning the dip is coming from a NEARBY source, not the target.
-#                This is the strongest blend discriminator that exists.
-#   fpflag_ss  = secondary eclipse flag — a significant secondary eclipse was
-#                seen, pointing strongly to an eclipsing binary, not a planet.
-#   fpflag_ec  = ephemeris contamination — the period/epoch matches a known EB
-#                elsewhere on the detector (another blend mechanism).
-#   fpflag_nt  = not transit-like — the shape doesn't match a box transit at all
-#                (too asymmetric, V-shaped, etc.). Strong "other" indicator.
-#   koi_prad   = fitted planet radius (Earth radii). Planets > ~15 R_earth are
-#                almost always EBs or giant mis-classified blends.
+# ── v3 additions ─────────────────────────────────────────────────────────────
+# IMPORTANT: fpflag_nt/ss/co/ec are EXCLUDED intentionally.
+# Those 4 flags are the direct source used in koi_labels.py to ASSIGN labels
+# (fpflag_ss → eclipsing_binary, fpflag_co/ec → blend, fpflag_nt → other).
+# Adding them as features would be severe data leakage — the model would simply
+# memorise the label mapping and report fake ~98% accuracy with zero real learning.
+#
+# koi_prad IS safe: planet radius is genuine astrophysical information that is
+# independent of how the label was assigned. A radius of 200 R_earth just means
+# the "planet" is actually Jupiter-sized or larger — almost certainly an EB.
 FEATURE_COLUMNS_V3 = FEATURE_COLUMNS_V2 + [
-    "fpflag_co", "fpflag_ss", "fpflag_ec", "fpflag_nt", "koi_prad",
+    "koi_prad",   # log-scaled planet radius — real signal, no leakage
 ]
 
 FEATURE_COLUMNS = FEATURE_COLUMNS_V3  # active set
