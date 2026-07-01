@@ -9,3 +9,5 @@ scipy
 transitleastsquares
 wotan
 xgboost
+
+python-dotenv
