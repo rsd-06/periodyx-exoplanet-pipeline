@@ -36,7 +36,8 @@ FIELDNAMES = [
     "kepid", "kepoi_name", "label", "tls_ran",
     "depth", "t_tot_hours", "t_in_hours", "flat_bottom_hours",
     "ingress_fraction", "period", "detection_significance",
-    "odd_even_depth_diff", "secondary_eclipse_depth", "depth_snr",
+    "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
+    "depth_snr", "n_signals_detected", "period_corrected",
 ]
 
 

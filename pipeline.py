@@ -6,6 +6,13 @@ This is the single entry point the rest of the system (batch runner, demo
 script, future dashboard) calls. Each stage is independently swappable
 (e.g. BLS-only vs BLS+TLS, synthetic vs real acquisition) without touching
 this orchestration logic.
+
+v2 — Wires in all 5 diagnostic fixes:
+  Fix 1: P/2 alias correction before secondary eclipse calculation
+  Fix 2: Eccentric orbit scan (full-phase secondary search)
+  Fix 3: Period-doubling check (BLS locked onto 2P)
+  Fix 4: Starspot consistency check (inside secondary_eclipse_depth)
+  Fix 5: Low-SNR ingress fraction bootstrap validation
 """
 
 import numpy as np
@@ -13,10 +20,14 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from preprocessing.detrend import detrend_lightcurve, sigma_clip
-from detection.periodic_search import bls_search, tls_search, detection_passes_threshold
+from detection.periodic_search import (bls_search, tls_search,
+                                        detection_passes_threshold,
+                                        check_half_period)
 from characterization.trapezoid_fit import phase_fold, fit_trapezoid, _trapezoid
 from features.extract import (odd_even_depth_difference, secondary_eclipse_depth,
-                               depth_snr, build_feature_vector)
+                               depth_snr, build_feature_vector,
+                               correct_period_alias, check_multiplanet_contamination,
+                               validate_ingress_fraction)
 from singletransit.flagging import flag_single_transit_candidates
 
 
@@ -57,6 +68,23 @@ def run_pipeline(time, flux, target_name="target", use_tls=True,
     # Stage B: periodic search (tiered BLS -> TLS)
     bls_result = bls_search(time_c, flux_flat)
     result["bls"] = {k: v for k, v in bls_result.items() if k not in ("periods", "power")}
+
+    # Fix 3: Check for period-doubling (BLS locked onto 2P instead of P).
+    # Do this BEFORE TLS, so if we correct the period, TLS refines the right one.
+    period_from_bls = bls_result["best_period"]
+    t0_from_bls = bls_result["best_t0"]
+    bls_max_power = bls_result["max_power"]
+
+    period_halved, halved = check_half_period(
+        time_c, flux_flat, period_from_bls, t0_from_bls, bls_max_power
+    )
+    if halved:
+        bls_result["best_period"] = period_halved
+        bls_result["best_t0"] = t0_from_bls  # epoch stays valid
+        result["bls"]["period_halved"] = True
+        result["bls"]["best_period"] = period_halved
+    else:
+        result["bls"]["period_halved"] = False
 
     detection = bls_result
     result["tls_ran"] = False
@@ -100,17 +128,72 @@ def run_pipeline(time, flux, target_name="target", use_tls=True,
     result["trapezoid_fit"] = {k: v for k, v in fit.items() if k != "fit_result"}
 
     # Stage D: feature engineering (astronomical discriminators)
+
+    # Compute odd-even depth difference first — needed by Fix 1
     odd_even = odd_even_depth_difference(time_c, flux_flat, period, t0, fit["t_tot"])
-    secondary = secondary_eclipse_depth(time_c, flux_flat, period, t0)
+
+    # Fix 1: Correct P/2 aliasing before computing secondary eclipse phase.
+    # If BLS locked onto half the true period, "phase 0.5" lands in the
+    # wrong place. correct_period_alias() tests 2*period and switches if
+    # the doubled period gives a more consistent signal.
+    corrected_period, period_was_corrected = correct_period_alias(
+        time_c, flux_flat, period, t0, odd_even
+    )
+    result["period_alias_corrected"] = period_was_corrected
+
+    # Fix 2 + Fix 4: Eccentric orbit scan + starspot consistency check.
+    # secondary_eclipse_depth() now scans the full phase curve (not just 0.5)
+    # and validates depth consistency across 3 time-thirds.
+    secondary, secondary_phase = secondary_eclipse_depth(
+        time_c, flux_flat, period, t0,
+        t_tot=fit["t_tot"],
+        corrected_period=corrected_period if period_was_corrected else None,
+    )
+    result["secondary_eclipse_phase"] = secondary_phase
+
     out_of_transit_mask = np.abs(phase_time) > fit["t_tot"]
     snr = depth_snr(fit["depth"], phase_flux[out_of_transit_mask])
 
-    features = build_feature_vector(fit, detection, odd_even, secondary, snr)
+    # Fix 3: Multi-planet contamination check.
+    # Build the trapezoid model flux for the full time array, then check
+    # residuals for additional periodic signals.
+    trapezoid_model = _trapezoid(
+        time_c,
+        f0=fit.get("f0", 1.0),
+        depth=fit["depth"],
+        t0=t0,
+        t_tot=fit["t_tot"],
+        t_in=fit["t_in"],
+    )
+    n_signals, secondary_reliable = check_multiplanet_contamination(
+        time_c, flux_flat, period, t0, fit["t_tot"], trapezoid_model
+    )
+    if not secondary_reliable:
+        secondary = np.nan  # contaminated; don't feed a spurious number to the model
+    result["n_signals_detected"] = n_signals
+
+    # Fix 5: Bootstrap-validate ingress fraction for low-SNR stars.
+    # For noisy detections, the fitter can produce a spuriously large ingress
+    # fraction (V-shape) even for genuine flat-bottomed transits. Bootstrap
+    # variance > 0.15 sets ingress_fraction = NaN so the classifier knows
+    # this measurement is unreliable.
+    ingress_validated = validate_ingress_fraction(
+        phase_time, phase_flux, fit, snr
+    )
+
+    features = build_feature_vector(
+        fit, detection, odd_even, secondary, secondary_phase, snr,
+        n_signals=n_signals,
+        period_corrected=period_was_corrected or halved,
+        ingress_fraction_validated=ingress_validated,
+    )
     result["features"] = features
 
     # Stage E: classification (skipped until curated dataset available)
     if classifier is not None and getattr(classifier, "is_fitted", False):
-        proba = classifier.predict_proba([features])[0]
+        import pandas as pd
+        feat_df = pd.DataFrame([features])
+        proba = classifier.predict_proba(feat_df)[0]
         result["classification"] = dict(zip(classifier.classes_, proba.tolist()))
     else:
         result["classification"] = "pending_training -- awaiting ISRO curated dataset"

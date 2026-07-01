@@ -28,7 +28,8 @@ from classification.classifier import ExoplanetClassifier, LABEL_CLASSES
 FEATURE_COLUMNS = [
     "depth", "t_tot_hours", "t_in_hours", "flat_bottom_hours",
     "ingress_fraction", "period", "detection_significance",
-    "odd_even_depth_diff", "secondary_eclipse_depth", "depth_snr",
+    "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
+    "depth_snr", "n_signals_detected", "period_corrected",
 ]
 
 
@@ -54,6 +55,13 @@ def main():
 
     clf = ExoplanetClassifier()
 
+    # Class weighting: address the known blend/other underperformance.
+    # XGBoost handles class imbalance via sample_weight in .fit().
+    # We compute inverse-frequency weights so rarer classes get proportionally
+    # more influence during training without artificially inflating their count.
+    from sklearn.utils.class_weight import compute_sample_weight
+    sample_weights = compute_sample_weight(class_weight="balanced", y=y_train)
+
     # Cross-validated estimate on the training split before final fit.
     # cross_val_score works on the raw XGBoost model, which (as of recent
     # XGBoost versions) requires integer-encoded labels -- encode here only
@@ -65,7 +73,7 @@ def main():
     scores = cross_val_score(clf.model, X_train, y_train_encoded, cv=cv, scoring="f1_macro")
     print(f"\n5-fold CV F1-macro: {scores.mean():.3f} +/- {scores.std():.3f}")
 
-    clf.fit(X_train, y_train)
+    clf.fit(X_train, y_train, sample_weight=sample_weights)
 
     y_pred = clf.predict(X_test)
     print("\nHeld-out test set report:")

@@ -33,15 +33,16 @@ class ExoplanetClassifier:
         self.feature_names_ = None
         self.label_encoder_ = LabelEncoder()
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         """X: list/array of feature dicts or DataFrame. y: array of string labels
         (e.g. 'transit', 'eclipsing_binary'). Internally encoded to integers
-        for XGBoost, transparently decoded back on predict()."""
+        for XGBoost, transparently decoded back on predict().
+        sample_weight: optional array for class-imbalance correction."""
         import pandas as pd
         X_df = pd.DataFrame(X) if not hasattr(X, "columns") else X
         self.feature_names_ = list(X_df.columns)
         y_encoded = self.label_encoder_.fit_transform(np.asarray(y))
-        self.model.fit(X_df, y_encoded)
+        self.model.fit(X_df, y_encoded, sample_weight=sample_weight)
         self.is_fitted = True
         return self
 
