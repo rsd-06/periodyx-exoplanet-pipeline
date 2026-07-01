@@ -22,11 +22,28 @@ LABEL_CLASSES = ["transit", "eclipsing_binary", "blend", "other"]
 
 
 class ExoplanetClassifier:
-    def __init__(self, n_estimators=200, max_depth=4, learning_rate=0.05):
+    def __init__(
+        self,
+        n_estimators=200,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=1.0,
+        colsample_bytree=1.0,
+        min_child_weight=1,
+        gamma=0.0,
+        reg_alpha=0.0,
+        reg_lambda=1.0,
+    ):
         self.model = xgb.XGBClassifier(
             n_estimators=n_estimators,
             max_depth=max_depth,
             learning_rate=learning_rate,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            min_child_weight=min_child_weight,
+            gamma=gamma,
+            reg_alpha=reg_alpha,
+            reg_lambda=reg_lambda,
             eval_metric="logloss",
         )
         self.is_fitted = False

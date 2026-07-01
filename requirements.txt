@@ -11,3 +11,5 @@ wotan
 xgboost
 
 python-dotenv
+
+optuna

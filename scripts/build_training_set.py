@@ -46,11 +46,13 @@ FIELDNAMES = [
     "ingress_fraction", "period", "detection_significance",
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
+    # v3: NASA vetting flags (zero compute cost — already in KOI table)
+    "fpflag_nt", "fpflag_ss", "fpflag_co", "fpflag_ec", "koi_prad",
 ]
 
 
 def process_one(args):
-    kepid, kepoi_name, label, use_tls, bls_sig_threshold = args
+    kepid, kepoi_name, label, use_tls, bls_sig_threshold, koi_flags = args
     try:
         time, flux, meta = fetch_lightcurve(f"KIC {kepid}", mission="Kepler", author="Kepler")
         result = run_pipeline(
@@ -61,6 +63,7 @@ def process_one(args):
         row = {"kepid": kepid, "kepoi_name": kepoi_name, "label": label,
                "tls_ran": result.get("tls_ran", False)}
         row.update(result["features"])
+        row.update(koi_flags)  # merge NASA vetting flags
         return ("ok", row)
     except Exception as e:
         return ("fail", dict(kepid=kepid, kepoi_name=kepoi_name,
@@ -100,8 +103,21 @@ def main():
     remaining = labels_df[~labels_df["kepid"].astype(str).isin(done)]
     print(f"{len(done)} stars already processed, {len(remaining)} remaining.")
 
+    # KOI flag columns to carry through to features (already computed by NASA)
+    flag_cols = ["koi_fpflag_nt", "koi_fpflag_ss", "koi_fpflag_co",
+                 "koi_fpflag_ec", "koi_prad"]
+
     tasks = [
-        (row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold)
+        (
+            row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold,
+            {
+                "fpflag_nt": getattr(row, "koi_fpflag_nt", None),
+                "fpflag_ss": getattr(row, "koi_fpflag_ss", None),
+                "fpflag_co": getattr(row, "koi_fpflag_co", None),
+                "fpflag_ec": getattr(row, "koi_fpflag_ec", None),
+                "koi_prad":  getattr(row, "koi_prad",  None),
+            }
+        )
         for row in remaining.itertuples()
     ]
 
