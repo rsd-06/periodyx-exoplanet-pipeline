@@ -46,14 +46,11 @@ FIELDNAMES = [
     "ingress_fraction", "period", "detection_significance",
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
-    # v3: koi_prad only — fpflag_nt/ss/co/ec are EXCLUDED because they are
-    # the direct source used to assign labels (data leakage if used as features).
-    "koi_prad",
 ]
 
 
 def process_one(args):
-    kepid, kepoi_name, label, use_tls, bls_sig_threshold, koi_flags = args
+    kepid, kepoi_name, label, use_tls, bls_sig_threshold = args
     try:
         time, flux, meta = fetch_lightcurve(f"KIC {kepid}", mission="Kepler", author="Kepler")
         result = run_pipeline(
@@ -64,7 +61,6 @@ def process_one(args):
         row = {"kepid": kepid, "kepoi_name": kepoi_name, "label": label,
                "tls_ran": result.get("tls_ran", False)}
         row.update(result["features"])
-        row.update(koi_flags)  # merge NASA vetting flags
         return ("ok", row)
     except Exception as e:
         return ("fail", dict(kepid=kepid, kepoi_name=kepoi_name,
@@ -104,15 +100,10 @@ def main():
     remaining = labels_df[~labels_df["kepid"].astype(str).isin(done)]
     print(f"{len(done)} stars already processed, {len(remaining)} remaining.")
 
-    # koi_prad is the only KOI-table column carried through to features.
-    # fpflag_nt/ss/co/ec are excluded — they are the label source (data leakage).
+    # We only use purely independent features. No KOI-table columns (except kepid/name/label)
+    # are carried through to the feature CSV to prevent data leakage.
     tasks = [
-        (
-            row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold,
-            {
-                "koi_prad": getattr(row, "koi_prad", None),
-            }
-        )
+        (row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold)
         for row in remaining.itertuples()
     ]
 

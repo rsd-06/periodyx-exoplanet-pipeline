@@ -31,29 +31,19 @@ from sklearn.utils.class_weight import compute_sample_weight
 
 from classification.classifier import ExoplanetClassifier, LABEL_CLASSES
 
-# ── v2 pipeline features ────────────────────────────────────────────────────
-FEATURE_COLUMNS_V2 = [
+# ── Features ─────────────────────────────────────────────────────────────
+# We use ONLY the 13 purely independent features extracted directly from the
+# raw lightcurves by our pipeline.
+#
+# IMPORTANT: NASA's fpflag_* columns and `koi_prad` are EXCLUDED. 
+# The fpflags are the literal answer key. `koi_prad` is subtly leaky because 
+# its presence and error bars correlate with NASA's confidence in the disposition.
+FEATURE_COLUMNS = [
     "depth", "t_tot_hours", "t_in_hours", "flat_bottom_hours",
     "ingress_fraction", "period", "detection_significance",
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
 ]
-
-# ── v3 additions ─────────────────────────────────────────────────────────────
-# IMPORTANT: fpflag_nt/ss/co/ec are EXCLUDED intentionally.
-# Those 4 flags are the direct source used in koi_labels.py to ASSIGN labels
-# (fpflag_ss → eclipsing_binary, fpflag_co/ec → blend, fpflag_nt → other).
-# Adding them as features would be severe data leakage — the model would simply
-# memorise the label mapping and report fake ~98% accuracy with zero real learning.
-#
-# koi_prad IS safe: planet radius is genuine astrophysical information that is
-# independent of how the label was assigned. A radius of 200 R_earth just means
-# the "planet" is actually Jupiter-sized or larger — almost certainly an EB.
-FEATURE_COLUMNS_V3 = FEATURE_COLUMNS_V2 + [
-    "koi_prad",   # log-scaled planet radius — real signal, no leakage
-]
-
-FEATURE_COLUMNS = FEATURE_COLUMNS_V3  # active set
 
 FILL_DEFAULTS = {
     "period_corrected": 0,
@@ -82,10 +72,6 @@ def load_and_prepare(features_path):
     print(f"Loaded {n_before} rows, {len(df)} usable after NaN imputation.")
     print("Class counts:\n", df["label"].value_counts().to_string())
 
-    # Log-transform koi_prad: distribution is extremely right-skewed
-    # (range 0.08 → 200,000 R_earth). Log scale makes it useful to the model.
-    if "koi_prad" in df.columns:
-        df["koi_prad"] = np.log1p(df["koi_prad"].clip(lower=0))
 
     return df
 
