@@ -73,9 +73,21 @@ def run_pipeline(time, flux, target_name="target", use_tls=True,
     t0 = detection["best_t0"]
     duration = detection["best_duration"]
 
-    result["detection_passes_threshold"] = detection_passes_threshold(
-        detection.get("SDE", detection.get("max_power", 0))
-    )
+    # Use the appropriate significance metric depending on which detector ran.
+    # TLS produces SDE (Signal Detection Efficiency), which is a well-established
+    # normalized score with a conventional cutoff of ~7.
+    # BLS produces our own normalized significance (same concept, same scale)
+    # computed inside bls_search(). Both are directly comparable.
+    # Do NOT use raw max_power here -- it's not on the same scale.
+    if result["tls_ran"]:
+        sig_for_threshold = detection.get("SDE", 0)
+    else:
+        sig_for_threshold = bls_result["significance"]
+        # Ensure the feature extractor uses this normalized significance instead of raw max_power
+        detection["SDE"] = sig_for_threshold
+
+    result["detection_passes_threshold"] = detection_passes_threshold(sig_for_threshold)
+    result["detection_significance_used"] = sig_for_threshold
 
     # Stage C: phase fold + trapezoid fit
     phase_time, phase_flux = phase_fold(time_c, flux_flat, period, t0)
