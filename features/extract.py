@@ -17,6 +17,7 @@ v2 — Fixes applied in this version:
           reliability; unreliable values are set to NaN for the classifier.
 """
 
+import os
 import numpy as np
 
 
@@ -107,9 +108,13 @@ def secondary_eclipse_depth(time, flux, period, t0, t_tot=None,
     if t_tot is None:
         t_tot = use_period * 0.05  # fallback: 5% of period
 
-    phase = ((time - t0 + use_period / 2) % use_period) - use_period / 2
-    # Normalise phase to [0, 1) for scanning
-    phase_01 = (phase + use_period / 2) / use_period
+    # Use simple 0-to-1 phase convention.
+    # The centered formula ((t - t0 + P/2) % P) - P/2 has a floating-point
+    # edge case: a secondary eclipse at EXACTLY t0 + P/2 (e.g. after alias
+    # correction doubles the period) wraps to -P/2 instead of +P/2, placing
+    # it at phase_01 = 0 (inside the primary mask) rather than 0.5.
+    # The 0-to-1 formula avoids this entirely.
+    phase_01 = ((time - t0) % use_period) / use_period
 
     # Mask primary eclipse region
     primary_half = t_tot / use_period * 1.5  # generous buffer
@@ -155,9 +160,13 @@ def secondary_eclipse_depth(time, flux, period, t0, t_tot=None,
     best_depth = dips[best_idx]
     best_phase = bin_centers_arr[best_idx]
 
-    # SNR guard: must exceed 3x noise floor
-    if noise_floor <= 0 or best_depth < 3 * noise_floor:
-        return 0.0, best_phase  # return 0 (not NaN) — no detectable secondary
+    # SNR guard: must exceed 1.5x noise floor.
+    # We use 1.5x (not 3x) because secondary eclipses are inherently shallower
+    # than primaries AND are partially absorbed by the biweight detrending window
+    # (window=0.5d vs eclipse duration ~0.15-0.2d). At 3x, real attenuated
+    # secondaries are routinely rejected. 1.5x still suppresses random noise.
+    if noise_floor <= 0 or best_depth < 1.5 * noise_floor:
+        return 0.0, best_phase  # return 0 (not NaN) -- no detectable secondary
 
     # Fix 4: Starspot consistency check across 3 time thirds
     depth_thirds = []
@@ -168,7 +177,8 @@ def secondary_eclipse_depth(time, flux, period, t0, t_tot=None,
                      (time < t_start + (i + 1) * third_len)
         if mask_third.sum() < 5:
             continue
-        phase_t = ((time[mask_third] - t0 + use_period / 2) % use_period) / use_period
+        # Use same 0-1 phase convention
+        phase_t = ((time[mask_third] - t0) % use_period) / use_period
         in_sec = np.abs(phase_t - best_phase) < bin_width
         if in_sec.sum() >= 3:
             bl_t = np.nanmedian(flux[mask_third])
