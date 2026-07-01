@@ -26,6 +26,14 @@ import csv
 import traceback
 from multiprocessing import Pool
 
+# --- WDAC BYPASS ---
+# Windows Defender Application Control blocks matplotlib's _c_internal_utils.pyd.
+# Since we don't render UI plots during feature extraction, we can safely mock 
+# this C-extension to allow lightkurve to import and run on this machine.
+import unittest.mock
+sys.modules['matplotlib._c_internal_utils'] = unittest.mock.MagicMock()
+# -------------------
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.koi_labels import load_koi_labels
