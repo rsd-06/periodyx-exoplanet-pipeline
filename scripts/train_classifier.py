@@ -28,18 +28,9 @@ from classification.classifier import ExoplanetClassifier, LABEL_CLASSES
 FEATURE_COLUMNS = [
     "depth", "t_tot_hours", "t_in_hours", "flat_bottom_hours",
     "ingress_fraction", "period", "detection_significance",
-    "odd_even_depth_diff", "secondary_eclipse_depth",
-    "depth_snr",
+    "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
+    "depth_snr", "n_signals_detected", "period_corrected"
 ]
-# NOTE: secondary_eclipse_phase, n_signals_detected, period_corrected are
-# intentionally excluded from v2 training. These columns exist in the CSV
-# but were filled with constants (0.5 / 1 / 0) for all 7,449 v1-era rows,
-# so they carry zero information for the classifier. They will be re-added
-# to FEATURE_COLUMNS once the training set is rebuilt with v2 pipeline code
-# (requires re-downloading Kepler light curves — currently blocked by WDAC
-# policy on this machine; see README Section 8 for details).
-
-
 
 def main():
     ap = argparse.ArgumentParser()

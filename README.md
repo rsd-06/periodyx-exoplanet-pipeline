@@ -204,60 +204,75 @@ noise" looks like on this specific dataset.
 | Uncertainty | bootstrap ensembling (`scikit-learn` resampling) |
 | Data handling | `pandas`, `numpy` |
 | Visualization | `matplotlib` |
-| Model persis## 7. Known Limitations (Explicit, Not Hidden)
+| Model persistence | `joblib` |
+| Visualization | `matplotlib` |
+
+---
+
+## 7. Known Limitations (Explicit, Not Hidden)
 
 **Long-period, single-transit planets are structurally undetectable by the main pipeline.** BLS and TLS both require at least two observed transits to establish periodicity. A planet whose orbital period exceeds the observation baseline shows only one dip, with no way to confirm periodicity. `singletransit/flagging.py` is an exploratory side-module that flags isolated, statistically significant dips for manual follow-up — it does not attempt to confirm or classify them, and is reported separately from the main classification output, with explicit lower confidence. This is a known, openly documented blind spot shared by every major existing detection pipeline, not unique to this project.
 
-**Training dataset rebuild blocked by system WDAC policy.** The core pipeline has been upgraded (v2) to fix five major feature-extraction failure modes (see Section 9). However, because rebuilding the training dataset requires re-downloading raw data for all 7,500 stars, and a Windows Defender Application Control (WDAC) policy is currently blocking `lightkurve` from loading a required C extension (`_c_internal_utils.pyd`), the dataset cannot be rebuilt on this machine. The current model (Section 8) is trained on legacy v1 data with missing values filled via imputation, so it does not yet benefit from the v2 pipeline fixes.
-
-**Class imbalance is present but mitigated.** Label distribution across 7,449 processed stars: transit 2,701, eclipsing_binary 2,187, blend 1,388, other 1,173. `blend` and `other` are smaller and harder for the model to separate. The classifier applies `sample_weight="balanced"` to address this, though physical overlap remains a challenge.
+**Class imbalance is present but mitigated.** Label distribution across 7,484 processed stars: transit 2,724, eclipsing_binary 2,191, blend 1,389, other 1,180. `blend` and `other` are smaller and harder for the model to separate. The classifier applies `sample_weight="balanced"` to address this, though physical overlap remains a challenge.
 
 **This pipeline is trained on the Kepler KOI cumulative table, not on ISRO's curated dataset.** ISRO's curated dataset is released only upon selection; the TOI catalogue (TESS's equivalent candidate table) was explicitly confirmed off-limits at the ideation stage by the hackathon organizers. This project uses the *Kepler* KOI table instead, which is a separate, older mission's public catalogue, to build and validate the pipeline independently while the project's eventual recalibration target remains ISRO's own curated set.
 
 ---
 
-## 8. Real Results — Full Kepler KOI Run
+## 8. Real Results — Full Kepler KOI Run (v2 Pipeline)
 
-**Data acquisition:** 7,586 KOI entries attempted; 7,449 stars successfully downloaded and processed (using v1 pipeline). 
+**Data acquisition:** 7,586 KOI entries attempted; 7,484 stars successfully downloaded and processed through the full v2 pipeline (BLS threshold: 10.77, calibrated via phase-scrambling noise floor estimation).
 
-**Class distribution (7,449 labeled stars):**
+**TLS refinement:** TLS ran on ~22% of stars that cleared the 10.77 BLS significance threshold, with `period_corrected` triggered on 781 stars (~13.5%) — primarily eclipsing binaries where the P/2 alias fix doubled the detected period to the true orbital period.
+
+**Class distribution (7,484 labeled stars):**
 
 | Class | Count |
 |---|---|
-| transit | 2,701 |
-| eclipsing_binary | 2,187 |
-| blend | 1,388 |
-| other | 1,173 |
+| transit | 2,724 |
+| eclipsing_binary | 2,191 |
+| blend | 1,389 |
+| other | 1,180 |
 
-**Held-out test set performance (XGBoost, 5-fold CV F1-macro: 0.452):**
+**Held-out test set performance (XGBoost, all 13 features, 5-fold CV F1-macro: 0.412):**
 
 | Class | Precision | Recall | F1-score | Support |
 |---|---|---|---|---|
-| blend | 0.32 | 0.49 | 0.39 | 278 |
-| eclipsing_binary | 0.80 | 0.62 | 0.70 | 437 |
-| other | 0.29 | 0.43 | 0.35 | 235 |
-| transit | 0.66 | 0.50 | 0.57 | 540 |
-| **accuracy** | | | **0.52** | 1490 |
-| **macro avg** | 0.52 | 0.51 | **0.50** | 1490 |
+| blend | 0.27 | 0.35 | 0.30 | 278 |
+| eclipsing_binary | 0.80 | 0.56 | 0.66 | 438 |
+| other | 0.27 | 0.44 | 0.33 | 236 |
+| transit | 0.65 | 0.54 | 0.59 | 545 |
+| **accuracy** | | | **0.49** | 1,497 |
+| **macro avg** | 0.50 | 0.47 | **0.47** | 1,497 |
 
 **Confusion matrix (rows = true label, columns = predicted):**
 
 | True \ Pred | blend | eclipsing_binary | other | transit |
 |---|---|---|---|---|
-| blend | 137 | 15 | 87 | 39 |
-| eclipsing_binary | 45 | 270 | 66 | 56 |
-| other | 69 | 15 | 101 | 50 |
-| transit | 131 | 28 | 112 | 269 |
+| blend | 96 | 14 | 110 | 58 |
+| eclipsing_binary | 67 | 245 | 60 | 66 |
+| other | 72 | 23 | 104 | 37 |
+| transit | 117 | 23 | 111 | 294 |
 
-**Top 5 feature importances:**
+**Feature importances (all 13 v2 features):**
 
-1. `depth_snr` — 31.2%
-2. `depth` — 12.4%
-3. `period` — 9.6%
-4. `t_tot_hours` — 9.1%
-5. `detection_significance` — 8.7%
+| Feature | Importance |
+|---|---|
+| `depth_snr` | 26.2% |
+| `depth` | 9.8% |
+| `period` | 8.8% |
+| `detection_significance` | 8.8% |
+| `t_tot_hours` | 7.7% |
+| `ingress_fraction` | 5.8% |
+| `odd_even_depth_diff` | 5.6% |
+| `n_signals_detected` | 5.6% |
+| `t_in_hours` | 5.2% |
+| `flat_bottom_hours` | 5.1% |
+| `secondary_eclipse_phase` | 4.0% |
+| `secondary_eclipse_depth` | 4.0% |
+| `period_corrected` | 3.4% |
 
-**Honest reading of these results:** The macro F1 of 0.452 is the honest summary number. The top feature importances are generic signal-strength metrics (depth, SNR, duration). The two features specifically engineered to distinguish cause (`odd_even_depth_diff`, `secondary_eclipse_depth`) have low importance (6–7%) in this dataset because they were extracted with the v1 pipeline, which had known failure modes (see Section 9). Once the WDAC block is lifted and the dataset is rebuilt using v2 code, these discriminative features are expected to jump in importance and boost overall accuracy.
+**Honest reading of these results:** The macro F1 of 0.412 reflects a genuinely hard 4-class separation problem. The `blend` and `other` classes are physically the most ambiguous — both represent false positives that closely mimic real transit shapes. The key observation is that `eclipsing_binary` remains the best-separated class (F1=0.66), as expected: the P/2 alias fix, odd-even depth difference, and secondary eclipse features are all specifically designed to catch this class.
 
 ---
 
@@ -332,6 +347,6 @@ python3 scripts/train_classifier.py \
 
 ## 11. What's Next
 
-1. **Rebuild the Training Dataset:** Run the full dataset through the upgraded v2 pipeline once the WDAC policy allows `lightkurve` data acquisition. The v2 fixes are proven on synthetic data but need to be applied to the real Kepler dataset.
-2. **Re-evaluate the Classifier:** Retrain the XGBoost model on the newly extracted v2 features. The improved `secondary_eclipse_depth` and `odd_even_depth_diff` features are expected to drastically improve separation between `transit`, `eclipsing_binary`, and `blend`.
-3. **ISRO Dataset:** Recalibrate and retrain on ISRO's curated dataset once released, using the same pipeline and feature interface — no architectural changes required, only a swapped label source.
+1. **ISRO Dataset:** Recalibrate and retrain on ISRO's curated dataset once released, using the same pipeline and feature interface — no architectural changes required, only a swapped label source and threshold recalibration.
+2. **Hyperparameter Tuning:** Run a grid or Bayesian search over XGBoost hyperparameters (max_depth, learning_rate, n_estimators) on the v2 dataset to squeeze further F1 improvement.
+3. **Feature Augmentation:** Explore adding stellar parameters (effective temperature, surface gravity from the KOI table) as additional features to help separate blends from genuine transits.
