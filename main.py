@@ -243,7 +243,7 @@ async def run_synthetic(case: str = Form("transit")):
     """
     try:
         if case == "transit":
-            t, flux, _ = make_synthetic_lightcurve()
+            t, flux, _ = make_synthetic_lightcurve(depth=0.0015)
             target_name = "SYNTH-TRANSIT-01"
         else:
             t, flux, _ = make_false_positive_lightcurve()
