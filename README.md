@@ -17,6 +17,21 @@ ISRO BAH 2026 — Problem Statement #07: AI-enabled Detection of Exoplanets from
 
 ---
 
+## Domain Background (How it works)
+
+To find exoplanets, we monitor the brightness of stars over time. When a planet passes in front of its host star (a "transit"), it temporarily blocks a fraction of the star's light. This creates a periodic, box-shaped dip in the star's light curve:
+
+![Transit Animation](https://raw.githubusercontent.com/google/exoplanet-ml/master/astronet/docs/transit.gif)
+
+A detected periodic dip signal is called a **Threshold Crossing Event (TCE)**. A TCE is characterized by three main parameters:
+- **Period**: The number of days between each occurrence of the detected signal.
+- **Duration**: The time elapsed by each occurrence of the signal.
+- **Epoch**: The time of the first observed occurrence of the signal.
+
+Our goal is to build a machine learning model to classify whether a given TCE is a genuine planet transit, or a false positive caused by other astronomical phenomena (like an eclipsing binary star or background stellar contamination).
+
+---
+
 ## 1. What This Project Does
 
 This is an end-to-end pipeline that takes raw stellar brightness measurements (light curves) from NASA's Kepler/TESS missions and automatically:
