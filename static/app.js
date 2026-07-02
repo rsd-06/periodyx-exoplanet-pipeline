@@ -46,6 +46,36 @@ function switchMode(mode) {
   document.getElementById('btn-upload').setAttribute('aria-selected', mode === 'upload');
 }
 
+function autoAdjustSyntheticParams() {
+  const caseVal = document.getElementById('case-select').value;
+  const depthInput = document.getElementById('synth_depth_pct');
+  const periodInput = document.getElementById('synth_period');
+  const noiseInput = document.getElementById('synth_noise');
+  const centroidInput = document.getElementById('synth_centroid');
+
+  if (caseVal === 'transit') {
+    depthInput.value = '0.15';
+    periodInput.value = '4.3';
+    noiseInput.value = '300';
+    centroidInput.value = '0.0';
+  } else if (caseVal === 'false_positive') {
+    depthInput.value = '1.5';
+    periodInput.value = '5.1';
+    noiseInput.value = '300';
+    centroidInput.value = '0.0';
+  } else if (caseVal === 'blend') {
+    depthInput.value = '0.5';
+    periodInput.value = '3.5';
+    noiseInput.value = '300';
+    centroidInput.value = '0.8';
+  } else if (caseVal === 'other') {
+    depthInput.value = '0.0';
+    periodInput.value = '4.3';
+    noiseInput.value = '800';
+    centroidInput.value = '0.0';
+  }
+}
+
 
 // ── File Upload Handling ───────────────────────────────────
 const uploadZone = document.getElementById('upload-zone');
@@ -152,6 +182,11 @@ async function runPipeline() {
       const caseVal = document.getElementById('case-select').value;
       const formData = new FormData();
       formData.append('case', caseVal);
+      formData.append('depth_pct', parseFloat(document.getElementById('synth_depth_pct').value) || 0);
+      formData.append('period', parseFloat(document.getElementById('synth_period').value) || 4.3);
+      formData.append('noise_ppm', parseFloat(document.getElementById('synth_noise').value) || 300);
+      formData.append('centroid_offset', parseFloat(document.getElementById('synth_centroid').value) || 0);
+
       const res = await fetch('/api/run_synthetic', { method: 'POST', body: formData });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -196,7 +231,7 @@ async function runPipeline() {
 
 // ── Result Rendering ───────────────────────────────────────
 function renderResults(data) {
-  const { probabilities, diagnostics, plot_base64, target } = data;
+  const { probabilities, diagnostics, plot_base64, target, expected_label } = data;
 
   if (!probabilities || probabilities.error) {
     showState('idle');
@@ -217,6 +252,17 @@ function renderResults(data) {
   document.getElementById('verdict-class').textContent = meta.label;
   document.getElementById('verdict-class').style.color = meta.color;
   document.getElementById('verdict-confidence').textContent = `${(topProb * 100).toFixed(1)}% confidence`;
+
+  // Ground Truth Expected Label
+  const expectedEl = document.getElementById('verdict-expected');
+  if (expected_label && CLASS_META[expected_label]) {
+    const expMeta = CLASS_META[expected_label];
+    expectedEl.innerHTML = `Expected (Ground Truth): <strong>${expMeta.label}</strong>`;
+    expectedEl.classList.remove('hidden');
+  } else {
+    expectedEl.classList.add('hidden');
+    expectedEl.innerHTML = '';
+  }
 
   // Probability bars
   renderProbaBars(probabilities, topKey);

@@ -235,33 +235,103 @@ def _format_pipeline_diagnostics(result: dict) -> dict:
 
 # ── API Routes ────────────────────────────────────────────────────────────────
 
-@app.post("/api/run_synthetic")
-async def run_synthetic(case: str = Form("transit")):
+def make_custom_synthetic_lightcurve(case: str, period: float, depth: float, noise_ppm: float):
     """
-    Generate a synthetic lightcurve, run the full pipeline, classify, and return results.
-    case: 'transit' | 'false_positive'
+    Generate a custom synthetic light curve with adjustable parameters.
+    No core pipeline code is touched here.
+    """
+    import numpy as np
+    from data.synthetic import trapezoid_signal
+    rng = np.random.default_rng(42)
+    t = np.arange(0, 27.0, 2.0 / (24 * 60))
+    t_tot = 2.6 / 24
+    t_in = 0.44 / 24
+
+    if case == "false_positive":
+        # Eclipsing Binary: alternating depths
+        flux = np.ones_like(t)
+        phase = ((t - 1.5 + period / 2) % period) - period / 2
+        tt = np.abs(phase)
+        flat_half = (t_tot / 2) - t_in
+        in_flat = tt <= flat_half
+        in_ramp = (tt > flat_half) & (tt <= t_tot / 2)
+
+        transit_number = np.floor((t - 1.5 + period / 2) / period)
+        depth_array = np.where(transit_number % 2 == 0, depth, depth * 0.6)
+
+        flux[in_flat] -= depth_array[in_flat]
+        frac = (t_tot / 2 - tt[in_ramp]) / t_in
+        flux[in_ramp] -= depth_array[in_ramp] * frac
+    elif case == "other" or depth <= 0.0001:
+        flux = np.ones_like(t)
+    else:
+        # Standard transit or blend
+        flux = trapezoid_signal(t, 1.5, period, depth, t_tot, t_in)
+
+    # Add noise
+    flux += rng.normal(0, noise_ppm * 1e-6, size=t.shape)
+
+    # Add slow systematic trend (mimics scattered light / thermal drift)
+    trend = 0.002 * np.sin(2 * np.pi * t / 13.0) + 0.0008 * (t / 27.0)
+    flux += trend
+
+    return t, flux
+
+
+@app.post("/api/run_synthetic")
+async def run_synthetic(
+    case: str = Form("transit"),
+    depth_pct: float = Form(0.15),
+    period: float = Form(4.3),
+    noise_ppm: float = Form(300.0),
+    centroid_offset: float = Form(0.0),
+):
+    """
+    Generate a custom synthetic lightcurve, run the full pipeline, classify,
+    and return results along with the physical ground truth (expected prediction).
     """
     try:
+        depth = depth_pct / 100.0
+        t, flux = make_custom_synthetic_lightcurve(case, period, depth, noise_ppm)
+
         if case == "transit":
-            t, flux, _ = make_synthetic_lightcurve(depth=0.0015)
             target_name = "SYNTH-TRANSIT-01"
-        else:
-            t, flux, _ = make_false_positive_lightcurve()
+        elif case == "false_positive":
             target_name = "SYNTH-FALSEPOS-01"
+        elif case == "blend":
+            target_name = "SYNTH-BLEND-01"
+        else:
+            target_name = "SYNTH-NOISE-01"
 
         result = run_pipeline(t, flux, target_name=target_name, use_tls=True)
 
-        feature_row = _build_feature_row(result, SOL_DEFAULTS)
+        stellar_params = SOL_DEFAULTS.copy()
+        stellar_params["centroid_offset_magnitude"] = centroid_offset
+
+        feature_row = _build_feature_row(result, stellar_params)
         probabilities = _classify(feature_row)
         plot_b64 = _plot_to_base64(result, target_name)
         diagnostics = _format_pipeline_diagnostics(result)
+
+        # Determine expected label based on physical parameters
+        if case == "other" or depth <= 0.0001:
+            expected = "other"
+        elif centroid_offset > 0.15:
+            expected = "blend"
+        elif case == "false_positive":
+            expected = "eclipsing_binary"
+        elif depth >= 0.008:
+            expected = "eclipsing_binary"  # too deep to be a planet transit
+        else:
+            expected = "transit"
 
         return JSONResponse({
             "target": target_name,
             "plot_base64": plot_b64,
             "probabilities": probabilities,
             "diagnostics": diagnostics,
-            "stellar_params": SOL_DEFAULTS,
+            "stellar_params": stellar_params,
+            "expected_label": expected,
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pipeline error: {traceback.format_exc()}")

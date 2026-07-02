@@ -76,19 +76,43 @@
 
         <!-- Synthetic Mode -->
         <div id="synthetic-section" class="input-section">
-          <p class="input-hint">Generate a synthetic Kepler-like light curve with an injected signal.</p>
+          <p class="input-hint">Generate a custom Kepler-like light curve with an injected signal.</p>
           <div class="field-group">
-            <label class="field-label" for="case-select">Signal Type</label>
+            <label class="field-label" for="case-select">Injected Signal Type</label>
             <div class="select-wrapper">
-              <select id="case-select" class="field-select">
+              <select id="case-select" class="field-select" onchange="autoAdjustSyntheticParams()">
                 <option value="transit">🌍 Planet Transit</option>
-                <option value="false_positive">⭐ Eclipsing Binary (False Positive)</option>
+                <option value="false_positive">⭐ Eclipsing Binary</option>
+                <option value="blend">🌌 Background Blend</option>
+                <option value="other">🔭 Pure Noise / Other</option>
               </select>
             </div>
           </div>
-          <div class="info-box">
-            <span class="info-icon">ℹ️</span>
-            Synthetic stars use Sol-like parameters (R★ = 1.0 R☉, T★ = 5778 K). Centroid offset = 0.
+
+          <!-- Synthetic Parameters Control Panel -->
+          <div class="priors-section">
+            <h3 class="priors-title">
+              <span>Injected Parameters</span>
+              <span class="priors-hint">Adjust to test model thresholds</span>
+            </h3>
+            <div class="priors-grid">
+              <div class="field-group">
+                <label class="field-label" for="synth_depth_pct">Transit Depth (%)</label>
+                <input type="number" id="synth_depth_pct" class="field-input" value="0.15" step="0.01" min="0.0" max="5.0" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="synth_period">Orbital Period (days)</label>
+                <input type="number" id="synth_period" class="field-input" value="4.3" step="0.1" min="0.5" max="30.0" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="synth_noise">Noise Level (ppm)</label>
+                <input type="number" id="synth_noise" class="field-input" value="300" step="50" min="0" max="5000" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="synth_centroid">Centroid Offset (arcsec)</label>
+                <input type="number" id="synth_centroid" class="field-input" value="0.0" step="0.01" min="0.0" max="10.0" />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -185,6 +209,7 @@
               <div class="verdict-label">DETECTED AS</div>
               <div class="verdict-class" id="verdict-class">Transit</div>
               <div class="verdict-confidence" id="verdict-confidence">94.2% confidence</div>
+              <div class="verdict-expected" id="verdict-expected" style="font-size: 11px; margin-top: 4px; color: var(--text-muted); font-weight: 500;"></div>
             </div>
           </div>
 
