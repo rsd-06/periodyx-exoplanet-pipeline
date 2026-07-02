@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeriodyX — Exoplanet Detection Pipeline</title>
+  <meta name="description" content="End-to-end AI exoplanet detection pipeline. Upload a light curve or generate synthetic data to classify stars as transit, eclipsing binary, blend, or other." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ── Header ────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🪐</span>
+        <div class="logo-text">
+          <span class="logo-title">PeriodyX</span>
+          <span class="logo-subtitle">Exoplanet Detection Pipeline</span>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge badge-isro">ISRO BAH 2026</span>
+        <span class="badge badge-v4">V4 Model</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main ──────────────────────────────────────────── -->
+  <main class="main-content">
+
+    <!-- ── Hero ─────────────────────────────── -->
+    <section class="hero">
+      <h1 class="hero-title">AI-Powered Exoplanet Detection</h1>
+      <p class="hero-desc">
+        Upload a real stellar light curve or generate a synthetic one. The full 7-stage pipeline 
+        — detrending, BLS/TLS search, trapezoid fitting, feature extraction, and V4 XGBoost classification — 
+        runs end-to-end and returns a physically-grounded verdict with uncertainty quantification.
+      </p>
+    </section>
+
+    <!-- ── Pipeline Steps ───────────────────── -->
+    <section class="pipeline-steps">
+      <div class="step"><span class="step-num">01</span><span class="step-label">Detrend</span></div>
+      <div class="step-arrow">→</div>
+      <div class="step"><span class="step-num">02</span><span class="step-label">BLS/TLS</span></div>
+      <div class="step-arrow">→</div>
+      <div class="step"><span class="step-num">03</span><span class="step-label">Phase Fold</span></div>
+      <div class="step-arrow">→</div>
+      <div class="step"><span class="step-num">04</span><span class="step-label">Trapezoid Fit</span></div>
+      <div class="step-arrow">→</div>
+      <div class="step"><span class="step-num">05</span><span class="step-label">Features</span></div>
+      <div class="step-arrow">→</div>
+      <div class="step"><span class="step-num">06</span><span class="step-label">V4 Classify</span></div>
+    </section>
+
+    <!-- ── Control Panel ─────────────────────── -->
+    <div class="layout-grid">
+      <div class="panel glass-panel" id="input-panel">
+        <h2 class="panel-title">
+          <span class="panel-icon">⚙️</span> Pipeline Input
+        </h2>
+
+        <!-- Mode Toggle -->
+        <div class="mode-toggle" role="tablist" aria-label="Input mode">
+          <button class="mode-btn active" id="btn-synthetic" role="tab" aria-selected="true" onclick="switchMode('synthetic')">
+            ✨ Synthetic
+          </button>
+          <button class="mode-btn" id="btn-upload" role="tab" aria-selected="false" onclick="switchMode('upload')">
+            📂 Upload CSV
+          </button>
+        </div>
+
+        <!-- Synthetic Mode -->
+        <div id="synthetic-section" class="input-section">
+          <p class="input-hint">Generate a synthetic Kepler-like light curve with an injected signal.</p>
+          <div class="field-group">
+            <label class="field-label" for="case-select">Signal Type</label>
+            <div class="select-wrapper">
+              <select id="case-select" class="field-select">
+                <option value="transit">🌍 Planet Transit</option>
+                <option value="false_positive">⭐ Eclipsing Binary (False Positive)</option>
+              </select>
+            </div>
+          </div>
+          <div class="info-box">
+            <span class="info-icon">ℹ️</span>
+            Synthetic stars use Sol-like parameters (R★ = 1.0 R☉, T★ = 5778 K). Centroid offset = 0.
+          </div>
+        </div>
+
+        <!-- Upload Mode -->
+        <div id="upload-section" class="input-section hidden">
+          <p class="input-hint">Upload a CSV with <code>time</code> and <code>flux</code> columns.</p>
+
+          <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">
+              <strong>Click to upload</strong> or drag and drop
+              <br /><span class="upload-hint">CSV with <code>time</code> and <code>flux</code> columns</span>
+            </div>
+            <input type="file" id="file-input" accept=".csv" hidden />
+          </div>
+          <div id="file-name-display" class="file-name hidden"></div>
+
+          <!-- Physical Priors -->
+          <div class="priors-section">
+            <h3 class="priors-title">
+              <span>Astrophysical Priors</span>
+              <span class="priors-hint">required for V4 classifier</span>
+            </h3>
+            <div class="priors-grid">
+              <div class="field-group">
+                <label class="field-label" for="koi_srad">Stellar Radius (R☉)</label>
+                <input type="number" id="koi_srad" class="field-input" value="1.0" step="0.01" min="0.1" max="10" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="koi_steff">Eff. Temperature (K)</label>
+                <input type="number" id="koi_steff" class="field-input" value="5778" step="1" min="2000" max="50000" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="koi_slogg">Surface Gravity (log g)</label>
+                <input type="number" id="koi_slogg" class="field-input" value="4.44" step="0.01" min="0" max="6" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="koi_kepmag">Kepler Magnitude</label>
+                <input type="number" id="koi_kepmag" class="field-input" value="12.0" step="0.1" min="6" max="20" />
+              </div>
+              <div class="field-group full-width">
+                <label class="field-label" for="centroid_offset">Centroid Offset (arcsec) <span class="field-tip">0 = no background contamination</span></label>
+                <input type="number" id="centroid_offset" class="field-input" value="0.0" step="0.001" min="0" max="10" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Run Button -->
+        <button class="run-btn" id="run-btn" onclick="runPipeline()">
+          <span class="run-btn-icon">🚀</span>
+          <span class="run-btn-text">Run Full Pipeline</span>
+        </button>
+
+        <!-- Error display -->
+        <div class="error-box hidden" id="error-box">
+          <span class="error-icon">⚠️</span>
+          <span id="error-text"></span>
+        </div>
+      </div>
+
+      <!-- ── Classification Result Panel ─────── -->
+      <div class="panel glass-panel" id="result-panel">
+        <h2 class="panel-title">
+          <span class="panel-icon">🔬</span> Classification Result
+        </h2>
+
+        <!-- Idle state -->
+        <div class="idle-state" id="idle-state">
+          <div class="idle-icon">🔭</div>
+          <p class="idle-text">Configure the pipeline on the left and press <strong>Run Full Pipeline</strong> to begin analysis.</p>
+        </div>
+
+        <!-- Loading state -->
+        <div class="loading-state hidden" id="loading-state">
+          <div class="orbit-loader">
+            <div class="orbit-planet"></div>
+          </div>
+          <p class="loading-text">Pipeline running…</p>
+          <div class="loading-steps" id="loading-steps">
+            <span class="lstep active" id="ls-detrend">Detrending</span>
+            <span class="lstep" id="ls-bls">BLS Search</span>
+            <span class="lstep" id="ls-fit">Trapezoid Fit</span>
+            <span class="lstep" id="ls-classify">Classifying</span>
+          </div>
+        </div>
+
+        <!-- Result state -->
+        <div class="result-state hidden" id="result-state">
+          <!-- Verdict banner -->
+          <div class="verdict-banner" id="verdict-banner">
+            <div class="verdict-icon" id="verdict-icon">🌍</div>
+            <div class="verdict-text">
+              <div class="verdict-label">DETECTED AS</div>
+              <div class="verdict-class" id="verdict-class">Transit</div>
+              <div class="verdict-confidence" id="verdict-confidence">94.2% confidence</div>
+            </div>
+          </div>
+
+          <!-- Class Probabilities -->
+          <div class="proba-section">
+            <h3 class="section-label">Class Probabilities</h3>
+            <div class="proba-bars" id="proba-bars"></div>
+          </div>
+
+          <!-- Key Diagnostics -->
+          <div class="diag-section">
+            <h3 class="section-label">Pipeline Diagnostics</h3>
+            <div class="diag-grid" id="diag-grid"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Plot Panel ─────────────────────────── -->
+    <div class="panel glass-panel plot-panel hidden" id="plot-panel">
+      <h2 class="panel-title">
+        <span class="panel-icon">📈</span> Signal Visualization
+        <span class="plot-subtitle" id="plot-subtitle"></span>
+      </h2>
+      <div class="plot-container">
+        <img id="result-plot" src="" alt="Pipeline visualization" class="result-plot" />
+      </div>
+      <div class="plot-legend">
+        <span class="legend-item"><span class="legend-dot blue"></span>Raw detrended flux</span>
+        <span class="legend-item"><span class="legend-dot purple"></span>Phase-folded</span>
+        <span class="legend-item"><span class="legend-dot red"></span>Trapezoid model fit</span>
+      </div>
+    </div>
+
+    <!-- ── About section ─────────────────────── -->
+    <section class="about-section">
+      <div class="about-grid">
+        <div class="about-card">
+          <div class="about-icon">🧬</div>
+          <h3>Physics-First Approach</h3>
+          <p>No black-box embeddings. Every feature is directly extracted from the transit shape physics: depth, duration, ingress fraction, secondary eclipses, and stellar priors.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-icon">🔍</div>
+          <h3>Rigorous Leakage Prevention</h3>
+          <p>We identified and eliminated NASA vetting confidence proxies (<code>koi_prad</code>, <code>fpflag_*</code>) that caused 98% accuracy via data leakage. V4 achieves honest 73% accuracy.</p>
+        </div>
+        <div class="about-card">
+          <div class="about-icon">📡</div>
+          <h3>Centroid Motion Detection</h3>
+          <p>The #1 most important feature (17.4% importance). If the center of light shifts during a dip, the source is a background star — this is exactly how NASA identifies blends.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>PeriodyX · ISRO BAH 2026 · Team rsd-06 · <a href="https://github.com/rsd-06/periodyx-exoplanet-pipeline" target="_blank">GitHub</a></p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -11,6 +11,10 @@ wotan
 xgboost
 
 python-dotenv
-
 optuna
-gradio
+huggingface_hub
+
+# Web application
+fastapi
+uvicorn[standard]
+python-multipart

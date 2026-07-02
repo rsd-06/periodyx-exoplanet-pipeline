@@ -3,9 +3,8 @@ title: PeriodyX Exoplanet Pipeline
 emoji: 🪐
 colorFrom: indigo
 colorTo: purple
-sdk: gradio
-sdk_version: "4.36.0"
-app_file: app.py
+sdk: docker
+app_port: 7860
 pinned: false
 ---
 
@@ -46,7 +45,21 @@ This is an end-to-end pipeline that takes raw stellar brightness measurements (l
 - **Classification:** `xgboost`, `scikit-learn`
 - **Data Handling:** `pandas`, `numpy`
 - **Model Persistence:** `joblib`
-- **Deployment:** Hugging Face Hub (`huggingface_hub`)
+- **Web Backend:** `FastAPI`, `uvicorn`
+- **Deployment:** Hugging Face Spaces (Docker), GitHub
+
+---
+
+## 2b. Interactive Web Application
+
+The pipeline is deployed as a full-stack web application on Hugging Face Spaces.
+
+**Architecture:**
+- **Backend:** FastAPI (`main.py`) loads the V4 `.joblib` model at startup and exposes two endpoints:
+  - `POST /api/run_synthetic` — generates a synthetic Kepler-like light curve, runs the full 6-stage pipeline, and returns classification probabilities + a dark-themed 3-panel visualization plot.
+  - `POST /api/run_custom` — accepts a user-uploaded CSV with `time` and `flux` columns plus astrophysical priors (stellar radius, temperature, etc.), runs the same pipeline, and returns results.
+- **Frontend:** A premium dark glassmorphism UI built in Vanilla HTML/CSS/JS (`static/`). Features animated pipeline step indicators, per-class confidence bars, and a physical diagnostics grid.
+- **No core pipeline changes:** `pipeline.py` and all core modules are completely untouched. The backend only *calls* the pipeline and passes results to the frontend.
 
 ---
 
