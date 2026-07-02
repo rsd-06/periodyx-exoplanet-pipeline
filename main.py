@@ -189,27 +189,48 @@ def _plot_to_base64(pipeline_result: dict, target_name: str) -> str:
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
+def _safe(val):
+    """Convert any numpy/Python value to a JSON-serializable native Python type."""
+    import math
+    import numpy as np
+    if isinstance(val, (np.bool_,)):
+        return bool(val)
+    if isinstance(val, (np.integer,)):
+        return int(val)
+    if isinstance(val, (np.floating,)):
+        v = float(val)
+        return None if (math.isnan(v) or math.isinf(v)) else v
+    if isinstance(val, float):
+        return None if (math.isnan(val) or math.isinf(val)) else val
+    return val
+
+
 def _format_pipeline_diagnostics(result: dict) -> dict:
-    """Extract a clean set of diagnostic metrics to return to the frontend."""
+    """Extract a clean set of diagnostic metrics to return to the frontend.
+    All values are cast to native Python types so JSONResponse can serialize them.
+    """
     fit = result["trapezoid_fit"]
     feats = result["features"]
-    return {
-        "bls_period_days": round(result["bls"]["best_period"], 4),
-        "tls_sde": round(result.get("tls", {}).get("SDE", result.get("detection_significance_used", 0)), 2),
-        "tls_ran": result.get("tls_ran", False),
-        "detection_passes": result.get("detection_passes_threshold", False),
-        "depth_pct": round(fit.get("depth", 0) * 100, 5),
-        "depth_err_pct": round(fit.get("depth_err", 0) * 100, 5),
-        "duration_hours": round(fit.get("t_tot", 0) * 24, 3),
-        "duration_err_hours": round(fit.get("t_tot_err", 0) * 24, 3),
-        "ingress_fraction": round(fit.get("ingress_fraction", 0), 4),
-        "depth_snr": round(feats.get("depth_snr", 0), 2),
-        "odd_even_diff": round(feats.get("odd_even_depth_diff", 0), 6),
-        "secondary_eclipse_depth": round(feats.get("secondary_eclipse_depth", 0), 6),
-        "period_alias_corrected": result.get("period_alias_corrected", False),
-        "n_signals_detected": result.get("n_signals_detected", 1),
-        "single_transit_candidates": len(result.get("single_transit_candidates", [])),
+    raw = {
+        "bls_period_days":          round(float(result["bls"]["best_period"]), 4),
+        "tls_sde":                  round(float(result.get("tls", {}).get("SDE", result.get("detection_significance_used", 0))), 2),
+        "tls_ran":                  bool(result.get("tls_ran", False)),
+        "detection_passes":         bool(result.get("detection_passes_threshold", False)),
+        "depth_pct":                round(float(fit.get("depth", 0)) * 100, 5),
+        "depth_err_pct":            round(float(fit.get("depth_err", 0)) * 100, 5),
+        "duration_hours":           round(float(fit.get("t_tot", 0)) * 24, 3),
+        "duration_err_hours":       round(float(fit.get("t_tot_err", 0)) * 24, 3),
+        "ingress_fraction":         round(float(fit.get("ingress_fraction", 0)), 4),
+        "depth_snr":                round(float(feats.get("depth_snr", 0)), 2),
+        "odd_even_diff":            round(float(feats.get("odd_even_depth_diff", 0)), 6),
+        "secondary_eclipse_depth":  round(float(feats.get("secondary_eclipse_depth", 0)), 6),
+        "period_alias_corrected":   bool(result.get("period_alias_corrected", False)),
+        "n_signals_detected":       int(result.get("n_signals_detected", 1)),
+        "single_transit_candidates": int(len(result.get("single_transit_candidates", []))),
     }
+    # Final pass: make every value safe (catches any edge cases from numpy)
+    return {k: _safe(v) for k, v in raw.items()}
+
 
 
 # ── API Routes ────────────────────────────────────────────────────────────────
