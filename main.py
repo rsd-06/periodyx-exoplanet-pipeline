@@ -118,11 +118,25 @@ def _build_feature_row(pipeline_result: dict, stellar_params: dict) -> pd.DataFr
 
 
 def _classify(feature_row: pd.DataFrame) -> dict:
-    """Run the V4 classifier and return probabilities. Handles missing model gracefully."""
+    """Run the classifier and return probabilities.
+    
+    Model-agnostic: slices the feature row to exactly the columns the loaded
+    model was trained on (classifier.feature_names_). This means the backend
+    works correctly regardless of whether the model on disk is v1 (10 features),
+    v3 (13 features), or v4 (19 features).
+    """
     if classifier is None or not classifier.is_fitted:
         return {"error": "Model not loaded"}
 
-    proba = classifier.predict_proba(feature_row)[0]
+    # Use only the exact feature columns this specific model was trained on
+    model_features = classifier.feature_names_
+    # Fill any columns the model needs but we didn't compute with 0
+    for col in model_features:
+        if col not in feature_row.columns:
+            feature_row[col] = 0.0
+    aligned_row = feature_row[model_features]
+
+    proba = classifier.predict_proba(aligned_row)[0]
     classes = classifier.classes_
     return {cls: float(p) for cls, p in zip(classes, proba)}
 
