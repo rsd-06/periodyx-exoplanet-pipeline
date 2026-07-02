@@ -1,3 +1,14 @@
+---
+title: PeriodyX Exoplanet Pipeline
+emoji: 🪐
+colorFrom: indigo
+colorTo: purple
+sdk: gradio
+sdk_version: "4.36.0"
+app_file: app.py
+pinned: false
+---
+
 # PeriodyX — Exoplanet Detection Pipeline
 
 ISRO BAH 2026 — Problem Statement #07: AI-enabled Detection of Exoplanets from Noisy Astronomical Light Curves
