@@ -46,11 +46,13 @@ FIELDNAMES = [
     "ingress_fraction", "period", "detection_significance",
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
+    # v4: Independent physical stellar priors and centroid motion
+    "koi_srad", "koi_steff", "koi_slogg", "koi_kepmag", "centroid_offset_magnitude",
 ]
 
 
 def process_one(args):
-    kepid, kepoi_name, label, use_tls, bls_sig_threshold = args
+    kepid, kepoi_name, label, use_tls, bls_sig_threshold, v4_features = args
     try:
         time, flux, meta = fetch_lightcurve(f"KIC {kepid}", mission="Kepler", author="Kepler")
         result = run_pipeline(
@@ -61,6 +63,22 @@ def process_one(args):
         row = {"kepid": kepid, "kepoi_name": kepoi_name, "label": label,
                "tls_ran": result.get("tls_ran", False)}
         row.update(result["features"])
+        row.update(v4_features)
+        
+        # Calculate scalar centroid offset magnitude from RA/Dec shift components.
+        # This explicitly targets the blend degeneracy.
+        import math
+        mra = row.get("koi_dicco_mra")
+        mdec = row.get("koi_dicco_mdec")
+        if mra is not None and mdec is not None and not math.isnan(mra) and not math.isnan(mdec):
+            row["centroid_offset_magnitude"] = math.hypot(mra, mdec)
+        else:
+            row["centroid_offset_magnitude"] = None
+        
+        # Pop the raw components since we only need the magnitude
+        row.pop("koi_dicco_mra", None)
+        row.pop("koi_dicco_mdec", None)
+
         return ("ok", row)
     except Exception as e:
         return ("fail", dict(kepid=kepid, kepoi_name=kepoi_name,
@@ -100,10 +118,20 @@ def main():
     remaining = labels_df[~labels_df["kepid"].astype(str).isin(done)]
     print(f"{len(done)} stars already processed, {len(remaining)} remaining.")
 
-    # We only use purely independent features. No KOI-table columns (except kepid/name/label)
-    # are carried through to the feature CSV to prevent data leakage.
+    # Thread v4 physical priors into the worker tasks. 
+    # (We don't drop NaNs here; train_classifier handles the strict dataset pruning).
     tasks = [
-        (row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold)
+        (
+            row.kepid, row.kepoi_name, row.label, not args.fast, args.bls_threshold,
+            {
+                "koi_srad": getattr(row, "koi_srad", None),
+                "koi_steff": getattr(row, "koi_steff", None),
+                "koi_slogg": getattr(row, "koi_slogg", None),
+                "koi_kepmag": getattr(row, "koi_kepmag", None),
+                "koi_dicco_mra": getattr(row, "koi_dicco_mra", None),
+                "koi_dicco_mdec": getattr(row, "koi_dicco_mdec", None),
+            }
+        )
         for row in remaining.itertuples()
     ]
 

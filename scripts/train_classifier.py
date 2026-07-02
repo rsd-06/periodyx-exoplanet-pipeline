@@ -43,6 +43,9 @@ FEATURE_COLUMNS = [
     "ingress_fraction", "period", "detection_significance",
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
+    # v4 additions:
+    "koi_srad", "koi_steff", "koi_slogg", "koi_kepmag",
+    "centroid_offset_magnitude", "reconstructed_prad"
 ]
 
 FILL_DEFAULTS = {
@@ -60,6 +63,41 @@ def load_and_prepare(features_path):
     df = pd.read_csv(features_path)
     n_before = len(df)
     df = df.dropna(subset=["label"])
+    
+    # ── Drop Missing Data to Prevent MNAR Leakage ───────────────────────
+    # Missingness in stellar parameters or centroid data correlates heavily
+    # with the 'FALSE POSITIVE' disposition. If we impute these (or 0-fill
+    # centroid data), XGBoost will learn "missing = false positive" or "missing = planet",
+    # which is exactly the data leakage we want to avoid.
+    # We must explicitly drop rows missing these fundamental physics requirements.
+    req_cols = ["koi_srad", "koi_steff", "koi_slogg", "koi_kepmag", "centroid_offset_magnitude"]
+    # Only drop them if they actually exist in the CSV (during v4)
+    if all(c in df.columns for c in req_cols):
+        n_before_drop = len(df)
+        dist_before = df["label"].value_counts()
+        df = df.dropna(subset=req_cols)
+        n_dropped = n_before_drop - len(df)
+        dist_after = df["label"].value_counts()
+        
+        print(f"\n--- DATASET PRUNING (v4) ---")
+        print(f"Dropped {n_dropped} rows ({n_dropped/n_before_drop*100:.1f}%) missing stellar or centroid data.")
+        print("Class distribution shift (Before vs After drop):")
+        df_dist = pd.DataFrame({"Before": dist_before, "After": dist_after, "Loss %": ((dist_before - dist_after) / dist_before * 100).round(1)})
+        print(df_dist.to_string())
+        print("----------------------------\n")
+        
+    # Reconstruct planetary radius using our independent depth & stellar radius.
+    # *CRITICAL ASSUMPTION*: For true planets, depth is ~ (Rp/Rs)^2.
+    # For blends (background eclipsing binaries), the transit depth is diluted by
+    # the target star. Therefore, for blends, `reconstructed_prad` represents
+    # an *effective* radius and will be systematically underestimated. This is
+    # actually a useful signal: an anomalously small radius for a deep, box-shaped
+    # transit is a strong blend indicator.
+    if "koi_srad" in df.columns and "depth" in df.columns:
+        # 1 Solar Radius = 109.2 Earth Radii
+        df["reconstructed_prad"] = np.sqrt(df["depth"].clip(lower=0)) * df["koi_srad"] * 109.2
+        # Extreme value suppression (there are some huge stars)
+        df["reconstructed_prad"] = np.log1p(df["reconstructed_prad"])
 
     for col in FEATURE_COLUMNS:
         if col not in df.columns:
@@ -69,9 +107,8 @@ def load_and_prepare(features_path):
         else:
             df[col] = df[col].fillna(df[col].median())
 
-    print(f"Loaded {n_before} rows, {len(df)} usable after NaN imputation.")
-    print("Class counts:\n", df["label"].value_counts().to_string())
-
+    print(f"Loaded {n_before} rows, {len(df)} usable after imputation.")
+    print("Final Class counts:\n", df["label"].value_counts().to_string())
 
     return df
 
@@ -146,6 +183,29 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=args.test_size, stratify=y, random_state=42
     )
+
+    # ── Ablation Study (v3 vs v4) ──────────────────────────────────────────
+    # Train a baseline on the identical row set but *without* the v4 features,
+    # to prove how much gain comes from physics vs dataset pruning.
+    v3_features = FEATURE_COLUMNS[:13] # The first 13 are the v3 features
+    print(f"\n--- ABLATION STUDY: v3 Baseline on Pruned Dataset ---")
+    clf_v3 = ExoplanetClassifier() # default params
+    sw_v3 = compute_sample_weight(class_weight="balanced", y=y_train)
+    
+    le_v3 = LabelEncoder()
+    y_train_enc_v3 = le_v3.fit_transform(y_train)
+    cv_v3 = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    scores_v3 = cross_val_score(clf_v3.model, X_train[v3_features], y_train_enc_v3, cv=cv_v3, scoring="f1_macro")
+    
+    clf_v3.fit(X_train[v3_features], y_train, sample_weight=sw_v3)
+    y_pred_v3 = clf_v3.predict(X_test[v3_features])
+    from sklearn.metrics import f1_score
+    test_f1_v3 = f1_score(y_test, y_pred_v3, average="macro")
+    
+    print(f"v3 (13 features) 5-fold CV F1-macro: {scores_v3.mean():.3f}")
+    print(f"v3 (13 features) Test F1-macro:      {test_f1_v3:.3f}")
+    print("-----------------------------------------------------\n")
+
 
     # ── Hyperparameter search ──────────────────────────────────────────────
     best_params = {}
