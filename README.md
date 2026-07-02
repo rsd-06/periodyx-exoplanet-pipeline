@@ -21,7 +21,7 @@ ISRO BAH 2026 — Problem Statement #07: AI-enabled Detection of Exoplanets from
 
 To find exoplanets, we monitor the brightness of stars over time. When a planet passes in front of its host star (a "transit"), it temporarily blocks a fraction of the star's light. This creates a periodic, box-shaped dip in the star's light curve:
 
-![Transit Animation](https://raw.githubusercontent.com/google/exoplanet-ml/master/astronet/docs/transit.gif)
+![Transit Animation](docs/transit.gif)
 
 A detected periodic dip signal is called a **Threshold Crossing Event (TCE)**. A TCE is characterized by three main parameters:
 - **Period**: The number of days between each occurrence of the detected signal.
