@@ -7,6 +7,7 @@
 
 // ── State ──────────────────────────────────────────────────
 let currentMode = 'synthetic';
+let batchResultsData = [];
 
 // Class metadata
 const CLASS_META = {
@@ -40,10 +41,23 @@ function switchMode(mode) {
   currentMode = mode;
   document.getElementById('synthetic-section').classList.toggle('hidden', mode !== 'synthetic');
   document.getElementById('upload-section').classList.toggle('hidden', mode !== 'upload');
+  document.getElementById('batch-section').classList.toggle('hidden', mode !== 'batch');
   document.getElementById('btn-synthetic').classList.toggle('active', mode === 'synthetic');
   document.getElementById('btn-upload').classList.toggle('active', mode === 'upload');
+  document.getElementById('btn-batch').classList.toggle('active', mode === 'batch');
   document.getElementById('btn-synthetic').setAttribute('aria-selected', mode === 'synthetic');
   document.getElementById('btn-upload').setAttribute('aria-selected', mode === 'upload');
+  document.getElementById('btn-batch').setAttribute('aria-selected', mode === 'batch');
+
+  // Show/hide the single-star result vs batch results panels
+  const batchPanel = document.getElementById('batch-results-panel');
+  if (mode === 'batch') {
+    // Run button label changes
+    document.querySelector('.run-btn-text').textContent = 'Run Batch Pipeline';
+  } else {
+    document.querySelector('.run-btn-text').textContent = 'Run Full Pipeline';
+    batchPanel.classList.add('hidden');
+  }
 }
 
 function autoAdjustSyntheticParams() {
@@ -85,6 +99,42 @@ const fileDisplay = document.getElementById('file-name-display');
 fileInput.addEventListener('change', () => {
   if (fileInput.files[0]) showFileName(fileInput.files[0].name);
 });
+
+// ── Batch File List Display ────────────────────────────────
+const batchFileInput = document.getElementById('batch-file-input');
+const batchFileList  = document.getElementById('batch-file-list');
+const batchZone      = document.getElementById('batch-upload-zone');
+
+batchFileInput.addEventListener('change', () => {
+  updateBatchFileList(batchFileInput.files);
+});
+
+batchZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  batchZone.classList.add('drag-over');
+});
+batchZone.addEventListener('dragleave', () => batchZone.classList.remove('drag-over'));
+batchZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  batchZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length > 0) {
+    const dt = new DataTransfer();
+    for (const f of e.dataTransfer.files) dt.items.add(f);
+    batchFileInput.files = dt.files;
+    updateBatchFileList(dt.files);
+  }
+});
+
+function updateBatchFileList(files) {
+  if (!files || files.length === 0) {
+    batchFileList.classList.add('hidden');
+    return;
+  }
+  batchFileList.innerHTML = Array.from(files).map(f =>
+    `<div class="batch-file-item"><span>${f.name}</span><span style="color:var(--text-muted)">${(f.size/1024).toFixed(1)} KB</span></div>`
+  ).join('');
+  batchFileList.classList.remove('hidden');
+}
 
 uploadZone.addEventListener('dragover', (e) => {
   e.preventDefault();
@@ -166,9 +216,15 @@ function clearError() {
 
 // ── Main Pipeline Runner ───────────────────────────────────
 async function runPipeline() {
-  clearError();
   const btn = document.getElementById('run-btn');
   btn.disabled = true;
+
+  if (currentMode === 'batch') {
+    await runBatchPipeline(btn);
+    return;
+  }
+
+  clearError();
   btn.querySelector('.run-btn-text').textContent = 'Running…';
 
   showState('loading');
@@ -224,14 +280,146 @@ async function runPipeline() {
     console.error(err);
   } finally {
     btn.disabled = false;
-    btn.querySelector('.run-btn-text').textContent = 'Run Full Pipeline';
+    btn.querySelector('.run-btn-text').textContent =
+      currentMode === 'batch' ? 'Run Batch Pipeline' : 'Run Full Pipeline';
   }
+}
+
+
+// ── Batch Pipeline Runner ──────────────────────────────────────────────────
+async function runBatchPipeline(btn) {
+  const batchInput = document.getElementById('batch-file-input');
+  if (!batchInput.files || batchInput.files.length === 0) {
+    showError('Please select at least one CSV file for batch processing.');
+    btn.disabled = false;
+    btn.querySelector('.run-btn-text').textContent = 'Run Batch Pipeline';
+    return;
+  }
+
+  showState('loading');
+  startLoadingAnimation();
+  document.getElementById('batch-results-panel').classList.add('hidden');
+
+  const formData = new FormData();
+  const files = batchInput.files;
+  for (let i = 0; i < files.length; i++) {
+    formData.append('files', files[i]);
+  }
+
+  // Build global priors JSON (applied to all files)
+  const priors = {
+    koi_srad: parseFloat(document.getElementById('batch_koi_srad').value) || 1.0,
+    koi_steff: parseFloat(document.getElementById('batch_koi_steff').value) || 5778.0,
+    koi_slogg: parseFloat(document.getElementById('batch_koi_slogg').value) || 4.44,
+    koi_kepmag: parseFloat(document.getElementById('batch_koi_kepmag').value) || 12.0,
+    centroid_offset_magnitude: parseFloat(document.getElementById('batch_centroid').value) || 0.0,
+  };
+  // Map every uploaded filename to the same global priors
+  const priorsMap = {};
+  for (let i = 0; i < files.length; i++) {
+    priorsMap[files[i].name] = priors;
+  }
+  formData.append('stellar_priors_json', JSON.stringify(priorsMap));
+
+  try {
+    const res = await fetch('/api/run_batch', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || 'Batch pipeline failed.');
+    }
+    const data = await res.json();
+    stopLoadingAnimation();
+    showState('idle'); // reset single-star panel
+    renderBatchResults(data);
+  } catch (err) {
+    stopLoadingAnimation();
+    showState('idle');
+    showError(err.message || 'Batch pipeline error.');
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.querySelector('.run-btn-text').textContent = 'Run Batch Pipeline';
+  }
+}
+
+
+// ── Batch Results Renderer ─────────────────────────────────────────────────
+function renderBatchResults(data) {
+  batchResultsData = data.results || [];
+  const errors     = data.errors   || [];
+
+  const panel  = document.getElementById('batch-results-panel');
+  const tbody  = document.getElementById('batch-results-tbody');
+  const summary = document.getElementById('batch-summary-text');
+  const errBox = document.getElementById('batch-errors-container');
+
+  summary.textContent = `${data.n_processed} processed, ${data.n_errors} errors`;
+  tbody.innerHTML = '';
+
+  batchResultsData.forEach(row => {
+    const meta = CLASS_META[row.prediction] || { label: row.prediction, icon: '🔬', color: 'var(--accent-blue)' };
+    const confPct = row.confidence != null ? (row.confidence * 100).toFixed(1) : '—';
+    const uncPct  = row.uncertainty != null ? (row.uncertainty * 100).toFixed(1) : '—';
+    const singleFlag = row.n_single_transit_candidates > 0
+      ? `<span style="color:#f0c040">⚠️ ${row.n_single_transit_candidates}</span>` : '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td title="${row.file}">${row.file.length > 22 ? row.file.slice(0, 22) + '…' : row.file}</td>
+      <td><span style="color:${meta.color};font-weight:600">${meta.icon} ${meta.label}</span></td>
+      <td>${confPct}%</td>
+      <td style="color:#8b949e">${uncPct}%</td>
+      <td>${row.period_days != null ? row.period_days.toFixed(4) : '—'}</td>
+      <td>${row.depth_pct != null ? row.depth_pct.toFixed(4) : '—'}</td>
+      <td>${row.duration_hours != null ? row.duration_hours.toFixed(3) : '—'}</td>
+      <td>${row.tls_sde != null ? row.tls_sde.toFixed(2) : '—'}</td>
+      <td>${singleFlag}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Error section
+  if (errors.length > 0) {
+    errBox.innerHTML = `<div class="alert-banner warning"><strong>⚠️ ${errors.length} file(s) failed</strong><ul>` +
+      errors.map(e => `<li><code>${e.file}</code>: ${e.error.split('\n')[0]}</li>`).join('') +
+      '</ul></div>';
+    errBox.classList.remove('hidden');
+  } else {
+    errBox.classList.add('hidden');
+  }
+
+  panel.classList.remove('hidden');
+}
+
+
+// ── Batch CSV Download ─────────────────────────────────────────────────────
+function downloadBatchCSV() {
+  if (!batchResultsData.length) return;
+  const headers = ['file','prediction','confidence_pct','uncertainty_pct',
+                   'period_days','depth_pct','duration_hours','tls_sde','n_single_transit_candidates'];
+  const rows = batchResultsData.map(r => [
+    r.file, r.prediction,
+    r.confidence != null ? (r.confidence * 100).toFixed(2) : '',
+    r.uncertainty != null ? (r.uncertainty * 100).toFixed(2) : '',
+    r.period_days != null ? r.period_days : '',
+    r.depth_pct != null ? r.depth_pct : '',
+    r.duration_hours != null ? r.duration_hours : '',
+    r.tls_sde != null ? r.tls_sde : '',
+    r.n_single_transit_candidates,
+  ].join(','));
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'periodyx_batch_results.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 
 // ── Result Rendering ───────────────────────────────────────
 function renderResults(data) {
-  const { probabilities, diagnostics, plot_base64, target, expected_label } = data;
+  const { probabilities, uncertainties, diagnostics, plot_base64, target, expected_label } = data;
 
   if (!probabilities || probabilities.error) {
     showState('idle');
@@ -265,10 +453,29 @@ function renderResults(data) {
   }
 
   // Probability bars
-  renderProbaBars(probabilities, topKey);
+  renderProbaBars(probabilities, uncertainties, topKey);
 
   // Diagnostics grid
   renderDiagnostics(diagnostics);
+
+  // Single Transit Alert
+  const alertContainer = document.getElementById('single-transit-alert-container');
+  if (alertContainer) {
+    if (diagnostics.n_single_transit_candidates > 0) {
+      let eventsHtml = diagnostics.single_transit_events.map((e, idx) => 
+        `<li>Event ${idx+1}: Day ${e.time.toFixed(1)} (Depth: ${(e.depth*100).toFixed(2)}%, Sig: ${e.significance.toFixed(1)})</li>`
+      ).join('');
+      alertContainer.innerHTML = `<div class="alert-banner warning">
+        <strong>⚠️ Single-Transit Candidates Found (${diagnostics.n_single_transit_candidates})</strong>
+        <p>The sliding-window scan detected isolated, statistically significant dips that do not repeat periodically. These require manual follow-up as they cannot be confirmed by BLS/TLS.</p>
+        <ul>${eventsHtml}</ul>
+      </div>`;
+      alertContainer.classList.remove('hidden');
+    } else {
+      alertContainer.innerHTML = '';
+      alertContainer.classList.add('hidden');
+    }
+  }
 
   // Show result pane
   showState('result');
@@ -284,7 +491,7 @@ function renderResults(data) {
   }
 }
 
-function renderProbaBars(probabilities, topKey) {
+function renderProbaBars(probabilities, uncertainties, topKey) {
   const container = document.getElementById('proba-bars');
   container.innerHTML = '';
 
@@ -294,6 +501,7 @@ function renderProbaBars(probabilities, topKey) {
   sorted.forEach(([cls, prob]) => {
     const meta = CLASS_META[cls] || { label: cls, color: 'var(--accent-blue)' };
     const pct  = (prob * 100).toFixed(1);
+    const uncert = uncertainties && uncertainties[cls] ? (uncertainties[cls] * 100).toFixed(1) : "0.0";
 
     const row = document.createElement('div');
     row.className = 'proba-row';
@@ -303,7 +511,7 @@ function renderProbaBars(probabilities, topKey) {
       <div class="proba-track">
         <div class="proba-fill" data-pct="${prob * 100}" style="background: ${meta.color}; width: 0%;"></div>
       </div>
-      <span class="proba-pct">${pct}%</span>
+      <span class="proba-pct">${pct}% <span style="font-size: 0.8em; color: #8b949e;">&plusmn;${uncert}</span></span>
     `;
     container.appendChild(row);
   });
@@ -326,7 +534,7 @@ function renderDiagnostics(diagnostics) {
     'bls_period_days', 'tls_sde', 'detection_passes', 'depth_pct',
     'duration_hours', 'depth_snr', 'ingress_fraction', 'odd_even_diff',
     'secondary_eclipse_depth', 'period_alias_corrected',
-    'n_signals_detected', 'single_transit_candidates',
+    'n_signals_detected', 'n_single_transit_candidates',
   ];
 
   displayKeys.forEach(key => {

@@ -72,6 +72,9 @@
           <button class="mode-btn" id="btn-upload" role="tab" aria-selected="false" onclick="switchMode('upload')">
             📂 Upload CSV
           </button>
+          <button class="mode-btn" id="btn-batch" role="tab" aria-selected="false" onclick="switchMode('batch')">
+            🗂️ Batch Upload
+          </button>
         </div>
 
         <!-- Synthetic Mode -->
@@ -161,6 +164,51 @@
           </div>
         </div>
 
+        <!-- Batch Mode -->
+        <div id="batch-section" class="input-section hidden">
+          <p class="input-hint">Upload multiple CSVs (each with <code>time</code> and <code>flux</code> columns) for a bulk pipeline run.</p>
+
+          <div class="upload-zone batch-zone" id="batch-upload-zone" onclick="document.getElementById('batch-file-input').click()">
+            <div class="upload-icon">🗂️</div>
+            <div class="upload-text">
+              <strong>Click to select files</strong> or drag and drop<br />
+              <span class="upload-hint">Multiple <code>.csv</code> files — one per star</span>
+            </div>
+            <input type="file" id="batch-file-input" accept=".csv" multiple hidden />
+          </div>
+          <div id="batch-file-list" class="batch-file-list hidden"></div>
+
+          <!-- Global stellar priors for batch (applied to all files unless overridden) -->
+          <div class="priors-section" style="margin-top: 16px;">
+            <h3 class="priors-title">
+              <span>Default Stellar Priors</span>
+              <span class="priors-hint">applied to all files</span>
+            </h3>
+            <div class="priors-grid">
+              <div class="field-group">
+                <label class="field-label" for="batch_koi_srad">Stellar Radius (R☉)</label>
+                <input type="number" id="batch_koi_srad" class="field-input" value="1.0" step="0.01" min="0.1" max="10" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="batch_koi_steff">Eff. Temperature (K)</label>
+                <input type="number" id="batch_koi_steff" class="field-input" value="5778" step="1" min="2000" max="50000" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="batch_koi_slogg">Surface Gravity (log g)</label>
+                <input type="number" id="batch_koi_slogg" class="field-input" value="4.44" step="0.01" min="0" max="6" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="batch_koi_kepmag">Kepler Magnitude</label>
+                <input type="number" id="batch_koi_kepmag" class="field-input" value="12.0" step="0.1" min="6" max="20" />
+              </div>
+              <div class="field-group full-width">
+                <label class="field-label" for="batch_centroid">Centroid Offset (arcsec)</label>
+                <input type="number" id="batch_centroid" class="field-input" value="0.0" step="0.001" min="0" max="10" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Run Button -->
         <button class="run-btn" id="run-btn" onclick="runPipeline()">
           <span class="run-btn-icon">🚀</span>
@@ -213,6 +261,9 @@
             </div>
           </div>
 
+          <!-- Single Transit Alert (dynamically populated) -->
+          <div id="single-transit-alert-container" class="hidden" style="margin-bottom: 24px;"></div>
+
           <!-- Class Probabilities -->
           <div class="proba-section">
             <h3 class="section-label">Class Probabilities</h3>
@@ -226,6 +277,32 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ── Batch Results Panel ────────────────────── -->
+    <div class="panel glass-panel hidden" id="batch-results-panel" style="margin-top: 24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <h2 class="panel-title" style="margin:0;">
+          <span class="panel-icon">📊</span> Batch Results
+          <span id="batch-summary-text" style="font-size:13px; font-weight:400; color:var(--text-muted); margin-left:12px;"></span>
+        </h2>
+        <button onclick="downloadBatchCSV()" class="run-btn" style="padding:8px 18px; font-size:13px; width:auto;">
+          ⬇️ Download CSV
+        </button>
+      </div>
+      <div id="batch-results-table-wrapper" style="overflow-x:auto; margin-top:16px;">
+        <table class="batch-table" id="batch-results-table">
+          <thead>
+            <tr>
+              <th>File</th><th>Prediction</th><th>Confidence</th><th>±σ</th>
+              <th>Period (d)</th><th>Depth (%)</th><th>Duration (h)</th>
+              <th>TLS SDE</th><th>Single Transit?</th>
+            </tr>
+          </thead>
+          <tbody id="batch-results-tbody"></tbody>
+        </table>
+      </div>
+      <div id="batch-errors-container" class="hidden" style="margin-top:16px;"></div>
     </div>
 
     <!-- ── Plot Panel ─────────────────────────── -->

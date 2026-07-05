@@ -193,10 +193,13 @@ def run_pipeline(time, flux, target_name="target", use_tls=True,
     if classifier is not None and getattr(classifier, "is_fitted", False):
         import pandas as pd
         feat_df = pd.DataFrame([features])
-        proba = classifier.predict_proba(feat_df)[0]
-        result["classification"] = dict(zip(classifier.classes_, proba.tolist()))
+        mean_proba, std_proba = classifier.predict_proba(feat_df)
+        
+        result["classification"] = dict(zip(classifier.classes_, mean_proba[0].tolist()))
+        result["classification_uncertainty"] = dict(zip(classifier.classes_, std_proba[0].tolist()))
     else:
         result["classification"] = "pending_training -- awaiting ISRO curated dataset"
+        result["classification_uncertainty"] = {}
 
     # Stage F: single-transit exploratory flagging (independent side-branch)
     if run_single_transit_scan:

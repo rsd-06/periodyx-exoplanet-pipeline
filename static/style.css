@@ -760,3 +760,82 @@ code {
   border-radius: 3px;
   color: var(--accent-blue);
 }
+
+/* ── Alert Banner ──────────────────────────────────────── */
+.alert-banner {
+  padding: 14px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  border: 1px solid;
+}
+
+.alert-banner.warning {
+  background: rgba(240, 192, 64, 0.08);
+  border-color: rgba(240, 192, 64, 0.35);
+  color: #f0e0a0;
+}
+
+.alert-banner strong { display: block; margin-bottom: 6px; font-size: 14px; }
+.alert-banner ul { margin: 8px 0 0 18px; padding: 0; }
+.alert-banner li { margin-bottom: 4px; }
+
+/* ── Batch Upload Zone ─────────────────────────────────── */
+.batch-zone { cursor: pointer; }
+
+.batch-file-list {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.batch-file-list .batch-file-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.batch-file-list .batch-file-item:last-child { border-bottom: none; }
+
+/* ── Batch Results Table ───────────────────────────────── */
+.batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.batch-table thead {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.batch-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.batch-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.6);
+  white-space: nowrap;
+}
+
+.batch-table tbody tr:hover {
+  background: rgba(255,255,255,0.025);
+  transition: background 0.15s;
+}
+
+.batch-table tbody tr:last-child td { border-bottom: none; }

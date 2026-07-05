@@ -31,6 +31,7 @@ from data.synthetic import make_synthetic_lightcurve, make_false_positive_lightc
 from pipeline import run_pipeline
 from characterization.trapezoid_fit import _trapezoid
 from classification.classifier import ExoplanetClassifier
+from features.extract import compute_stellar_density_ratio
 
 # ── V4 Feature column order (must match training exactly) ────────────────────
 FEATURE_COLUMNS = [
@@ -39,7 +40,9 @@ FEATURE_COLUMNS = [
     "odd_even_depth_diff", "secondary_eclipse_depth", "secondary_eclipse_phase",
     "depth_snr", "n_signals_detected", "period_corrected",
     "koi_srad", "koi_steff", "koi_slogg", "koi_kepmag",
-    "centroid_offset_magnitude", "reconstructed_prad"
+    "centroid_offset_magnitude",
+    # v5: Kepler's Third Law self-consistency
+    "stellar_density_ratio"
 ]
 
 FILL_DEFAULTS = {
@@ -60,15 +63,31 @@ SOL_DEFAULTS = {
 
 app = FastAPI(title="PeriodyX Exoplanet Pipeline API")
 
-# ── Load V4 classifier at startup ─────────────────────────────────────────────
+
+def _load_classifier(path):
+    """Load either an ExoplanetClassifier or TwoStageClassifier from disk.
+    The saved payload carries a '_type' key set at save() time. Falls back
+    to ExoplanetClassifier for legacy models without the key.
+    """
+    import joblib
+    try:
+        payload = joblib.load(path)
+        if isinstance(payload, dict) and payload.get("_type") == "TwoStageClassifier":
+            return TwoStageClassifier.load(path)
+        return ExoplanetClassifier.load(path)
+    except Exception as e:
+        print(f"⚠️  Failed to load classifier: {e}")
+        return None
+
+
+# ── Load V4/V5 classifier at startup ─────────────────────────────────────────
 MODEL_PATH = "models/exoplanet_classifier.joblib"
 classifier = None
 if os.path.exists(MODEL_PATH):
-    try:
-        classifier = ExoplanetClassifier.load(MODEL_PATH)
-        print(f"✅ V4 classifier loaded from {MODEL_PATH}")
-    except Exception as e:
-        print(f"⚠️  Failed to load classifier: {e}")
+    classifier = _load_classifier(MODEL_PATH)
+    if classifier is not None:
+        arch = type(classifier).__name__
+        print(f"✅ Classifier loaded from {MODEL_PATH} [{arch}]")
 else:
     print(f"⚠️  Model not found at {MODEL_PATH} — classification will be skipped")
 
@@ -101,13 +120,15 @@ def _build_feature_row(pipeline_result: dict, stellar_params: dict) -> pd.DataFr
         "koi_slogg": stellar_params.get("koi_slogg", 4.44),
         "koi_kepmag": stellar_params.get("koi_kepmag", 12.0),
         "centroid_offset_magnitude": stellar_params.get("centroid_offset_magnitude", 0.0),
+        # v5: stellar density self-consistency
+        "stellar_density_ratio": compute_stellar_density_ratio(
+            pipeline_result["bls"]["best_period"],
+            fit.get("t_tot", 0.0),            # already in days
+            fit.get("depth", 0.0),
+            stellar_params.get("koi_srad", 1.0),
+            stellar_params.get("koi_slogg", 4.44),
+        ),
     }
-
-    # Reconstruct planetary radius using same formula as training
-    koi_srad = row["koi_srad"]
-    depth_val = max(row["depth"], 0.0)
-    reconstructed_prad = np.sqrt(depth_val) * koi_srad * 109.2
-    row["reconstructed_prad"] = float(np.log1p(reconstructed_prad))
 
     df = pd.DataFrame([row])
     # Ensure column order matches training exactly
@@ -126,7 +147,7 @@ def _classify(feature_row: pd.DataFrame) -> dict:
     v3 (13 features), or v4 (19 features).
     """
     if classifier is None or not classifier.is_fitted:
-        return {"error": "Model not loaded"}
+        return {"probabilities": {}, "uncertainties": {}}
 
     # Use only the exact feature columns this specific model was trained on
     model_features = classifier.feature_names_
@@ -136,9 +157,12 @@ def _classify(feature_row: pd.DataFrame) -> dict:
             feature_row[col] = 0.0
     aligned_row = feature_row[model_features]
 
-    proba = classifier.predict_proba(aligned_row)[0]
+    mean_proba, std_proba = classifier.predict_proba(aligned_row)
     classes = classifier.classes_
-    return {cls: float(p) for cls, p in zip(classes, proba)}
+    return {
+        "probabilities": {cls: _safe(p) for cls, p in zip(classes, mean_proba[0])},
+        "uncertainties": {cls: _safe(s) for cls, s in zip(classes, std_proba[0])}
+    }
 
 
 def _plot_to_base64(pipeline_result: dict, target_name: str) -> str:
@@ -197,11 +221,13 @@ def _safe(val):
         return bool(val)
     if isinstance(val, (np.integer,)):
         return int(val)
-    if isinstance(val, (np.floating,)):
+    if isinstance(val, (np.floating, float)):
         v = float(val)
         return None if (math.isnan(v) or math.isinf(v)) else v
-    if isinstance(val, float):
-        return None if (math.isnan(val) or math.isinf(val)) else val
+    if isinstance(val, list):
+        return [_safe(x) for x in val]
+    if isinstance(val, dict):
+        return {k: _safe(v) for k, v in val.items()}
     return val
 
 
@@ -226,7 +252,8 @@ def _format_pipeline_diagnostics(result: dict) -> dict:
         "secondary_eclipse_depth":  round(float(feats.get("secondary_eclipse_depth", 0)), 6),
         "period_alias_corrected":   bool(result.get("period_alias_corrected", False)),
         "n_signals_detected":       int(result.get("n_signals_detected", 1)),
-        "single_transit_candidates": int(len(result.get("single_transit_candidates", []))),
+        "n_single_transit_candidates": int(len(result.get("single_transit_candidates", []))),
+        "single_transit_events":    result.get("single_transit_candidates", []),
     }
     # Final pass: make every value safe (catches any edge cases from numpy)
     return {k: _safe(v) for k, v in raw.items()}
@@ -328,7 +355,8 @@ async def run_synthetic(
         return JSONResponse({
             "target": target_name,
             "plot_base64": plot_b64,
-            "probabilities": probabilities,
+            "probabilities": probabilities["probabilities"],
+            "uncertainties": probabilities["uncertainties"],
             "diagnostics": diagnostics,
             "stellar_params": stellar_params,
             "expected_label": expected,
@@ -383,7 +411,8 @@ async def run_custom(
         return JSONResponse({
             "target": target_name,
             "plot_base64": plot_b64,
-            "probabilities": probabilities,
+            "probabilities": probabilities["probabilities"],
+            "uncertainties": probabilities["uncertainties"],
             "diagnostics": diagnostics,
             "stellar_params": stellar_params,
         })
@@ -391,6 +420,95 @@ async def run_custom(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pipeline error: {traceback.format_exc()}")
+
+
+@app.post("/api/run_batch")
+async def run_batch(
+    files: list[UploadFile] = File(...),
+    stellar_priors_json: str = Form("{}"),
+):
+    """
+    Accept multiple CSV files (each with 'time' and 'flux' columns), run the
+    full pipeline on every file, and return a compact summary table.
+
+    stellar_priors_json (optional): JSON object mapping filename -> stellar
+    priors dict. Example:
+        {"star_a.csv": {"koi_srad": 1.2, "koi_steff": 5500, ...},
+         "star_b.csv": {...}}
+    Files not mentioned in the JSON get Sol-like defaults.
+    """
+    import json as _json
+    try:
+        priors_map = _json.loads(stellar_priors_json) if stellar_priors_json.strip() else {}
+    except Exception:
+        priors_map = {}
+
+    results_out = []
+    errors_out  = []
+
+    for upload in files:
+        fname = upload.filename or "unknown.csv"
+        target_name = os.path.splitext(fname)[0]
+        try:
+            contents = await upload.read()
+            df_input = pd.read_csv(io.BytesIO(contents))
+            if not {"time", "flux"}.issubset(set(df_input.columns)):
+                errors_out.append({"file": fname, "error": "Missing 'time' or 'flux' column"})
+                continue
+
+            t    = df_input["time"].values.astype(float)
+            flux = df_input["flux"].values.astype(float)
+
+            result = run_pipeline(t, flux, target_name=target_name, use_tls=True)
+
+            file_priors = priors_map.get(fname, {})
+            stellar_params = {
+                "koi_srad": float(file_priors.get("koi_srad", 1.0)),
+                "koi_steff": float(file_priors.get("koi_steff", 5778.0)),
+                "koi_slogg": float(file_priors.get("koi_slogg", 4.44)),
+                "koi_kepmag": float(file_priors.get("koi_kepmag", 12.0)),
+                "centroid_offset_magnitude": float(file_priors.get("centroid_offset_magnitude", 0.0)),
+            }
+
+            feature_row  = _build_feature_row(result, stellar_params)
+            clf_out      = _classify(feature_row)
+            probabilities = clf_out["probabilities"]
+            uncertainties = clf_out["uncertainties"]
+
+            # Top predicted class
+            top_class = max(probabilities, key=probabilities.get) if probabilities else "unknown"
+            top_prob  = probabilities.get(top_class, 0.0)
+            top_uncert = uncertainties.get(top_class, 0.0)
+
+            fit  = result["trapezoid_fit"]
+            diag = _format_pipeline_diagnostics(result)
+
+            results_out.append({
+                "file":          fname,
+                "target":        target_name,
+                "prediction":    top_class,
+                "confidence":    _safe(top_prob),
+                "uncertainty":   _safe(top_uncert),
+                "probabilities": {k: _safe(v) for k, v in probabilities.items()},
+                "uncertainties": {k: _safe(v) for k, v in uncertainties.items()},
+                "period_days":   _safe(diag.get("bls_period_days")),
+                "depth_pct":     _safe(diag.get("depth_pct")),
+                "duration_hours":_safe(diag.get("duration_hours")),
+                "depth_snr":     _safe(diag.get("depth_snr")),
+                "tls_sde":       _safe(diag.get("tls_sde")),
+                "n_single_transit_candidates": diag.get("n_single_transit_candidates", 0),
+                "stellar_params": stellar_params,
+            })
+
+        except Exception as exc:
+            errors_out.append({"file": fname, "error": traceback.format_exc()})
+
+    return JSONResponse({
+        "n_processed": len(results_out),
+        "n_errors":    len(errors_out),
+        "results":     results_out,
+        "errors":      errors_out,
+    })
 
 
 # ── Static file serving ───────────────────────────────────────────────────────

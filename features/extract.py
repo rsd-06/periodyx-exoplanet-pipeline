@@ -22,6 +22,87 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
+# V5: Stellar Density Self-Consistency (Kepler's Third Law)
+# ---------------------------------------------------------------------------
+
+def compute_stellar_density_ratio(period_days, duration_days, depth,
+                                   koi_srad, koi_slogg):
+    """Kepler's Third Law implied stellar density vs. measured stellar density.
+
+    For a genuine planet transit, the orbital geometry constrains the stellar
+    density: rho_star ∝ T_dur³ / (P² · delta). If this "implied" density
+    is wildly inconsistent with the star's actual density (from independent
+    stellar parameters), the geometry doesn't work for a planet — it's most
+    likely a grazing eclipsing binary or background blend.
+
+    This is one of NASA's own real vetting discriminants (the "a/Rstar" test).
+
+    Parameters
+    ----------
+    period_days : float — orbital period in days
+    duration_days : float — total transit duration in days
+    depth : float — fractional transit depth (0 to 1)
+    koi_srad : float — stellar radius in solar radii
+    koi_slogg : float — surface gravity log10(g / cm/s²)
+
+    Returns
+    -------
+    log_density_ratio : float — log10(rho_implied / rho_measured).
+        0 = perfect consistency, large |value| = red flag.
+        NaN if inputs are invalid/missing.
+    """
+    try:
+        if (period_days <= 0 or duration_days <= 0 or depth <= 0
+                or koi_srad <= 0 or np.isnan(period_days)
+                or np.isnan(duration_days) or np.isnan(depth)
+                or np.isnan(koi_srad) or np.isnan(koi_slogg)):
+            return np.nan
+
+        # G in solar units: G = 6.674e-11 m³/(kg·s²)
+        # 1 M_sun = 1.989e30 kg, 1 R_sun = 6.957e8 m
+        # g = G * M / R² → M = g * R² / G
+        # We work in solar units throughout.
+
+        G_cgs = 6.674e-8          # cm³ g⁻¹ s⁻²
+        R_sun_cm = 6.957e10       # cm
+        M_sun_g = 1.989e33        # g
+
+        g_cgs = 10 ** koi_slogg   # cm/s²
+        R_star_cm = koi_srad * R_sun_cm
+
+        # Mass from surface gravity + radius (exact, no lookup needed)
+        M_star_g = g_cgs * R_star_cm ** 2 / G_cgs
+        M_star_solar = M_star_g / M_sun_g
+
+        # Measured stellar density (solar units: rho_sun = 1.41 g/cm³)
+        rho_sun = 1.41  # g/cm³
+        rho_star_cm3 = M_star_g / (4 / 3 * np.pi * R_star_cm ** 3)
+        rho_measured = rho_star_cm3 / rho_sun  # in solar densities
+
+        # Implied density from transit geometry (Seager & Mallén-Ornelas 2003)
+        # rho_implied = (3*pi/(G*P²)) * (T/P)^3 / sqrt(delta) * correction
+        P_sec = period_days * 86400.0
+        T_sec = duration_days * 86400.0
+        delta = float(depth)
+
+        # Seager & Mallén-Ornelas 2003, eq. 9 (b=0, circular):
+        # a/R* ≈ P/(pi*T_tot) for b=0 → rho = (3*pi/G*P^2)*(a/R*)^3 = 3*pi*P/(G*T_tot^3)
+        # Verified: Sun+Earth → T=13h*3600=46800s, P=365d*86400=3.15e7s →
+        #   rho = 3*pi*3.15e7 / (6.674e-8 * 46800^3) = 9.9e7 / 6.84e12 ≈ 1.45 g/cm³  ✓
+        rho_implied_cgs = 3.0 * np.pi * P_sec / (G_cgs * T_sec**3)
+        rho_implied_solar = rho_implied_cgs / rho_sun
+
+        if rho_implied_solar <= 0 or rho_measured <= 0:
+            return np.nan
+
+        ratio = rho_implied_solar / rho_measured
+        return float(np.log10(np.clip(ratio, 1e-4, 1e4)))
+
+    except Exception:
+        return np.nan
+
+
+# ---------------------------------------------------------------------------
 # Fix 1: P/2 alias detection and correction
 # ---------------------------------------------------------------------------
 

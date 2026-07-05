@@ -17,15 +17,19 @@ from sklearn.preprocessing import LabelEncoder
 import xgboost as xgb
 
 
-def bootstrap_classifier_uncertainty(X_train, y_train, X_query, n_bootstrap=20,
-                                      xgb_params=None):
-    """Train an ensemble of bootstrap-resampled classifiers and report the
-    mean and standard deviation of predicted class probabilities for X_query.
+def train_bootstrap_ensemble(X_train, y_train, n_bootstrap=20, xgb_params=None,
+                             sample_weight=None):
+    """Train an ensemble of bootstrap-resampled classifiers.
+
+    Each bootstrap iteration resamples rows (with replacement). If
+    ``sample_weight`` is supplied, the resampled weights are passed directly
+    to ``clf.fit`` so class-balance correction is preserved inside every
+    bootstrap model — not just the aggregate.
 
     Returns
     -------
-    mean_proba, std_proba : arrays of shape (n_query, n_classes)
-    classes : array of original string class labels, in column order
+    models : list of fitted xgb.XGBClassifier
+    classes_ : array of original string class labels
     """
     import pandas as pd
     xgb_params = xgb_params or dict(
@@ -34,19 +38,19 @@ def bootstrap_classifier_uncertainty(X_train, y_train, X_query, n_bootstrap=20,
     )
 
     X_train_df = pd.DataFrame(X_train) if not hasattr(X_train, "columns") else X_train
-    X_query_df = pd.DataFrame(X_query) if not hasattr(X_query, "columns") else X_query
 
     encoder = LabelEncoder()
     y_encoded = encoder.fit_transform(np.asarray(y_train))
 
-    predictions = []
+    models = []
+    print(f"Training bootstrap ensemble of {n_bootstrap} models...")
     for i in range(n_bootstrap):
-        X_boot, y_boot = resample(X_train_df, y_encoded, random_state=i)
+        idx = resample(np.arange(len(X_train_df)), random_state=i)
+        X_boot = X_train_df.iloc[idx]
+        y_boot = y_encoded[idx]
+        sw_boot = sample_weight[idx] if sample_weight is not None else None
         clf = xgb.XGBClassifier(**xgb_params)
-        clf.fit(X_boot, y_boot)
-        predictions.append(clf.predict_proba(X_query_df))
+        clf.fit(X_boot, y_boot, sample_weight=sw_boot)
+        models.append(clf)
 
-    predictions = np.array(predictions)  # shape (n_bootstrap, n_query, n_classes)
-    mean_proba = predictions.mean(axis=0)
-    std_proba = predictions.std(axis=0)
-    return mean_proba, std_proba, encoder.classes_
+    return models, encoder.classes_

@@ -30,6 +30,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.class_weight import compute_sample_weight
 
 from classification.classifier import ExoplanetClassifier, LABEL_CLASSES
+from features.extract import compute_stellar_density_ratio
 
 # ── Features ─────────────────────────────────────────────────────────────
 # We use ONLY the 13 purely independent features extracted directly from the
@@ -45,7 +46,9 @@ FEATURE_COLUMNS = [
     "depth_snr", "n_signals_detected", "period_corrected",
     # v4 additions:
     "koi_srad", "koi_steff", "koi_slogg", "koi_kepmag",
-    "centroid_offset_magnitude", "reconstructed_prad"
+    "centroid_offset_magnitude",
+    # v5: Kepler's Third Law self-consistency
+    "stellar_density_ratio"
 ]
 
 FILL_DEFAULTS = {
@@ -86,18 +89,19 @@ def load_and_prepare(features_path):
         print(df_dist.to_string())
         print("----------------------------\n")
         
-    # Reconstruct planetary radius using our independent depth & stellar radius.
-    # *CRITICAL ASSUMPTION*: For true planets, depth is ~ (Rp/Rs)^2.
-    # For blends (background eclipsing binaries), the transit depth is diluted by
-    # the target star. Therefore, for blends, `reconstructed_prad` represents
-    # an *effective* radius and will be systematically underestimated. This is
-    # actually a useful signal: an anomalously small radius for a deep, box-shaped
-    # transit is a strong blend indicator.
-    if "koi_srad" in df.columns and "depth" in df.columns:
-        # 1 Solar Radius = 109.2 Earth Radii
-        df["reconstructed_prad"] = np.sqrt(df["depth"].clip(lower=0)) * df["koi_srad"] * 109.2
-        # Extreme value suppression (there are some huge stars)
-        df["reconstructed_prad"] = np.log1p(df["reconstructed_prad"])
+
+    # v5: Stellar density self-consistency (Kepler's Third Law)
+    # Requires period (days), duration (days), depth, koi_srad, koi_slogg.
+    # These are all present in the training CSV by this point.
+    if all(c in df.columns for c in ["period", "t_tot_hours", "depth", "koi_srad", "koi_slogg"]):
+        df["stellar_density_ratio"] = df.apply(
+            lambda r: compute_stellar_density_ratio(
+                r["period"], r["t_tot_hours"] / 24.0,
+                r["depth"], r["koi_srad"], r["koi_slogg"]
+            ), axis=1
+        )
+    else:
+        df["stellar_density_ratio"] = np.nan
 
     for col in FEATURE_COLUMNS:
         if col not in df.columns:
@@ -218,35 +222,63 @@ def main():
         print("\nSkipping Optuna (--no-optuna set). Using default XGBoost params.")
 
     # ── Final model ────────────────────────────────────────────────────────
-    clf = ExoplanetClassifier(**best_params)
+    from sklearn.metrics import f1_score
+    from classification.two_stage_classifier import TwoStageClassifier
+
     sample_weights = compute_sample_weight(class_weight="balanced", y=y_train)
 
-    # Quick CV estimate on the training split
+    # Quick CV estimate on the training split (single-model baseline)
     le = LabelEncoder()
     y_train_enc = le.fit_transform(y_train)
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    scores = cross_val_score(clf.model, X_train, y_train_enc, cv=cv,
+    clf_single = ExoplanetClassifier(**best_params)
+    scores = cross_val_score(clf_single.model, X_train, y_train_enc, cv=cv,
                              scoring="f1_macro")
-    print(f"\n5-fold CV F1-macro: {scores.mean():.3f} +/- {scores.std():.3f}")
+    print(f"\n5-fold CV F1-macro (single-model): {scores.mean():.3f} +/- {scores.std():.3f}")
 
-    clf.fit(X_train, y_train, sample_weight=sample_weights)
+    # ── Single-model ensemble ───────────────────────────────────────────────
+    print("\nTraining Single-Model Bootstrap Ensemble (N=20)...")
+    clf_single.fit_ensemble(X_train, y_train, n_bootstrap=20, sample_weight=sample_weights)
+    y_pred_single = clf_single.predict(X_test)
+    f1_single = f1_score(y_test, y_pred_single, average="macro")
+    print(f"\nSingle-model test F1-macro: {f1_single:.4f}")
+    print(classification_report(y_test, y_pred_single))
 
-    y_pred = clf.predict(X_test)
-    print("\nHeld-out test set report:")
-    print(classification_report(y_test, y_pred))
-    print("Confusion matrix (rows=true, cols=predicted):")
+    # ── Two-stage ensemble ──────────────────────────────────────────────────
+    print("\nTraining Two-Stage Bootstrap Ensemble (N=20)...")
+    clf_two = TwoStageClassifier(xgb_params=best_params if best_params else None)
+    clf_two.fit_ensemble(X_train, y_train, n_bootstrap=20, sample_weight=sample_weights)
+    y_pred_two = clf_two.predict(X_test)
+    f1_two = f1_score(y_test, y_pred_two, average="macro")
+    print(f"\nTwo-stage test F1-macro: {f1_two:.4f}")
+    print(classification_report(y_test, y_pred_two))
+
+    # ── Choose winner ──────────────────────────────────────────────────────
+    print(f"\n{'='*55}")
+    print(f"  Single-model F1: {f1_single:.4f}")
+    print(f"  Two-stage   F1: {f1_two:.4f}")
+    if f1_two >= f1_single:
+        print("  WINNER: Two-Stage Classifier — saving as production model.")
+        winner = clf_two
+    else:
+        print("  WINNER: Single-Model Classifier — saving as production model.")
+        winner = clf_single
+    print(f"{'='*55}\n")
+
+    print("\nConfusion matrix (winner, rows=true, cols=predicted):")
+    y_pred_winner = winner.predict(X_test)
     labels_present = sorted(y.unique())
     print(pd.DataFrame(
-        confusion_matrix(y_test, y_pred, labels=labels_present),
+        confusion_matrix(y_test, y_pred_winner, labels=labels_present),
         index=labels_present, columns=labels_present,
     ))
 
-    print("\nFeature importances:")
-    for k, v in sorted(clf.feature_importance().items(), key=lambda x: -x[1]):
+    print("\nFeature importances (Stage 1 / primary model):")
+    for k, v in sorted(winner.feature_importance().items(), key=lambda x: -x[1]):
         print(f"  {k:28s} {v:.4f}")
 
     os.makedirs(os.path.dirname(args.model_out), exist_ok=True)
-    clf.save(args.model_out)
+    winner.save(args.model_out)
     print(f"\nSaved trained model to {args.model_out}")
 
 
