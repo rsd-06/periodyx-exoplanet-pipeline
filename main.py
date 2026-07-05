@@ -31,6 +31,7 @@ from data.synthetic import make_synthetic_lightcurve, make_false_positive_lightc
 from pipeline import run_pipeline
 from characterization.trapezoid_fit import _trapezoid
 from classification.classifier import ExoplanetClassifier
+from classification.two_stage_classifier import TwoStageClassifier
 from features.extract import compute_stellar_density_ratio
 
 # ── V4 Feature column order (must match training exactly) ────────────────────
