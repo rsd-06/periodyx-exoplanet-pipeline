@@ -146,10 +146,10 @@ Building an astronomical ML pipeline is notoriously susceptible to **data leakag
 
 | Class | Precision | Recall | F1-Score | v1/v3 Baseline F1 | v4 F1 |
 |---|---|---|---|---|---|
-| Transit (Planet) | 0.87 | 0.91 | **0.89** | 0.62 | 0.88 |
-| Eclipsing Binary | 0.80 | 0.67 | **0.73** | 0.65 | 0.72 |
-| Blend | 0.56 | 0.67 | **0.61** | 0.33 | 0.61 |
-| Other | 0.47 | 0.43 | **0.45** | 0.32 | 0.44 |
+| Transit (Planet) | 0.87 | 0.89 | **0.88** | 0.62 | 0.88 |
+| Eclipsing Binary | 0.84 | 0.60 | **0.70** | 0.65 | 0.72 |
+| Blend | 0.56 | 0.68 | **0.62** | 0.33 | 0.61 |
+| Other | 0.38 | 0.51 | **0.44** | 0.32 | 0.44 |
 
 ### Why it worked
 
@@ -193,8 +193,8 @@ python3 scripts/build_training_set.py --koi-csv data/koi_cumulative.csv --bls-th
 ```
 *(Replace `10.77` with your own calibrated threshold from Step 3. This step takes hours for the full 7,000+ star dataset.)*
 
-### Step 5: Train the Classifier (v4)
-Merges extracted shape features with NASA archival stellar priors, drops rows with missing physical data (MNAR-safe), optimizes hyperparameters via Optuna, and trains the N=20 bootstrap ensemble for uncertainty quantification.
+### Step 5: Train the Classifier (v5)
+Merges extracted shape features with NASA archival stellar priors, drops rows with missing physical data (MNAR-safe), optimizes hyperparameters via Optuna, and trains the Two-Stage Bootstrap Ensemble (N=20) for uncertainty quantification.
 ```bash
 python3 scripts/train_classifier.py --features data/training_features.csv --optuna-trials 50
 ```
