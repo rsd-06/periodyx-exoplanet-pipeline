@@ -77,7 +77,7 @@ class TwoStageClassifier:
         y1 = np.where(y_arr == "transit", "transit", "not_transit")
         sw1 = sw  # same rows, same weights
         print(f"\n[TwoStage] Stage 1 — transit vs. not_transit (N={n_bootstrap})")
-        self.stage1_models, _ = train_bootstrap_ensemble(
+        self.stage1_models, self.stage1_classes_ = train_bootstrap_ensemble(
             X_df, y1, n_bootstrap=n_bootstrap,
             xgb_params=self.xgb_params, sample_weight=sw1,
         )
@@ -96,7 +96,7 @@ class TwoStageClassifier:
             sw2 = sw2_balanced
 
         print(f"[TwoStage] Stage 2 — EB/blend/other on {mask2.sum()} non-transit rows (N={n_bootstrap})")
-        self.stage2_models, _ = train_bootstrap_ensemble(
+        self.stage2_models, self.stage2_classes_ = train_bootstrap_ensemble(
             X2, y2, n_bootstrap=n_bootstrap,
             xgb_params=self.xgb_params, sample_weight=sw2,
         )
@@ -118,15 +118,15 @@ class TwoStageClassifier:
         n = len(X_df)
 
         # Stage 1 probabilities across ensemble
-        # Each model returns shape (n, 2): [not_transit, transit]
+        # Each model returns shape (n, 2) corresponding to self.stage1_classes_
         s1_preds = []
+        try:
+            transit_idx = list(self.stage1_classes_).index("transit")
+        except ValueError:
+            transit_idx = 1 # Fallback just in case
+
         for m in self.stage1_models:
             proba = m.predict_proba(X_df)   # (n, 2)
-            # find transit column index
-            try:
-                transit_idx = list(m.classes_).index(1)  # encoded as 1
-            except ValueError:
-                transit_idx = 1
             s1_preds.append(proba[:, transit_idx])       # (n,)
         s1_arr = np.array(s1_preds)   # (N_boot, n)
         p_transit_mean = s1_arr.mean(axis=0)              # (n,)
@@ -134,28 +134,35 @@ class TwoStageClassifier:
         p_not_transit_mean = 1 - p_transit_mean
 
         # Stage 2 probabilities across ensemble
-        # Each model returns shape (n, 3): [EB, blend, other]
+        # Each model returns shape (n, len(stage2_classes_))
         s2_preds = []
         for m in self.stage2_models:
-            proba = m.predict_proba(X_df)   # (n, 3)
+            proba = m.predict_proba(X_df)   # (n, len(classes))
             s2_preds.append(proba)
-        s2_arr = np.array(s2_preds)         # (N_boot, n, 3)
-        s2_mean = s2_arr.mean(axis=0)       # (n, 3)  [EB, blend, other]
-        s2_std  = s2_arr.std(axis=0)        # (n, 3)
+        s2_arr = np.array(s2_preds)         # (N_boot, n, n_classes)
+        s2_mean = s2_arr.mean(axis=0)       # (n, n_classes)
+        s2_std  = s2_arr.std(axis=0)        # (n, n_classes)
 
-        # Reconstruct 4-class output — column order: transit, EB, blend, other
+        # Reconstruct 4-class output — column order must exactly match self._classes
         mean_proba = np.zeros((n, 4))
         std_proba  = np.zeros((n, 4))
 
-        mean_proba[:, 0] = p_transit_mean
-        std_proba[:, 0]  = p_transit_std
+        # 1. Map Stage 1 Transit to ALL_CLASSES
+        transit_out_idx = list(self._classes).index("transit")
+        mean_proba[:, transit_out_idx] = p_transit_mean
+        std_proba[:, transit_out_idx]  = p_transit_std
 
-        for i in range(3):  # EB=1, blend=2, other=3
-            mean_proba[:, i+1] = p_not_transit_mean * s2_mean[:, i]
+        # 2. Map Stage 2 dynamically using self.stage2_classes_
+        for i, name in enumerate(self.stage2_classes_):
+            if name not in self._classes:
+                continue
+            out_idx = list(self._classes).index(name)
+            mean_proba[:, out_idx] = p_not_transit_mean * s2_mean[:, i]
             # Error propagation: var(A*B) ≈ (A*σ_B)² + (B*σ_A)² for uncorrelated
             var_i = ((p_not_transit_mean * s2_std[:, i]) ** 2
                      + (s2_mean[:, i]   * p_transit_std) ** 2)
-            std_proba[:, i+1] = np.sqrt(var_i)
+            std_proba[:, out_idx] = np.sqrt(var_i)
+
 
         # Renormalize rows to sum to 1 (small numerical drift only)
         row_sums = mean_proba.sum(axis=1, keepdims=True)
@@ -191,6 +198,8 @@ class TwoStageClassifier:
             "_type": "TwoStageClassifier",
             "stage1_models": self.stage1_models,
             "stage2_models": self.stage2_models,
+            "stage1_classes_": self.stage1_classes_,
+            "stage2_classes_": self.stage2_classes_,
             "feature_names_": self.feature_names_,
             "xgb_params": self.xgb_params,
             "is_fitted": self.is_fitted,
@@ -203,6 +212,9 @@ class TwoStageClassifier:
         obj = cls(xgb_params=payload.get("xgb_params"))
         obj.stage1_models = payload["stage1_models"]
         obj.stage2_models = payload["stage2_models"]
+        # Default fallback to alphabetically sorted classes for backward compatibility with hotfix models
+        obj.stage1_classes_ = payload.get("stage1_classes_", ["not_transit", "transit"])
+        obj.stage2_classes_ = payload.get("stage2_classes_", ["blend", "eclipsing_binary", "other"])
         obj.feature_names_ = payload["feature_names_"]
         obj.is_fitted = payload["is_fitted"]
         return obj

@@ -14,7 +14,7 @@ if not token:
     raise RuntimeError("HF_TOKEN not found.")
 
 api = HfApi(token=token)
-repo_id = "rsd-06/periodyx-exoplanet-classifier-v1"
+repo_id = "rsd-06/periodyx-exoplanet-classifier-v5"
 
 print(f"Uploading README.md to {repo_id}...")
 api.upload_file(
