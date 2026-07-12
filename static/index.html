@@ -24,7 +24,7 @@
       </div>
       <div class="header-badges">
         <span class="badge badge-isro">ISRO BAH 2026</span>
-        <span class="badge badge-v4">V4 Model</span>
+        <span class="badge badge-v5">V5 Model</span>
       </div>
     </div>
   </header>
@@ -37,7 +37,7 @@
       <h1 class="hero-title">AI-Powered Exoplanet Detection</h1>
       <p class="hero-desc">
         Upload a real stellar light curve or generate a synthetic one. The full 7-stage pipeline 
-        — detrending, BLS/TLS search, trapezoid fitting, feature extraction, and V4 XGBoost classification — 
+        — detrending, BLS/TLS search, trapezoid fitting, feature extraction, and V5 Two-Stage XGBoost classification — 
         runs end-to-end and returns a physically-grounded verdict with uncertainty quantification.
       </p>
     </section>
@@ -54,7 +54,7 @@
       <div class="step-arrow">→</div>
       <div class="step"><span class="step-num">05</span><span class="step-label">Features</span></div>
       <div class="step-arrow">→</div>
-      <div class="step"><span class="step-num">06</span><span class="step-label">V4 Classify</span></div>
+      <div class="step"><span class="step-num">06</span><span class="step-label">V5 Classify</span></div>
     </section>
 
     <!-- ── Control Panel ─────────────────────── -->
@@ -137,7 +137,7 @@
           <div class="priors-section">
             <h3 class="priors-title">
               <span>Astrophysical Priors</span>
-              <span class="priors-hint">required for V4 classifier</span>
+              <span class="priors-hint">required for V5 classifier</span>
             </h3>
             <div class="priors-grid">
               <div class="field-group">
@@ -332,7 +332,7 @@
         <div class="about-card">
           <div class="about-icon">🔍</div>
           <h3>Rigorous Leakage Prevention</h3>
-          <p>We identified and eliminated NASA vetting confidence proxies (<code>koi_prad</code>, <code>fpflag_*</code>) that caused 98% accuracy via data leakage. V4 achieves honest 73% accuracy.</p>
+          <p>We implemented Kepler's Third Law as a physical constraint (stellar density ratio) and deployed a hierarchical Two-Stage Bootstrap Ensemble (V5), achieving an honest F1-Macro of 66% (72% accuracy).</p>
         </div>
         <div class="about-card">
           <div class="about-icon">📡</div>

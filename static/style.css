@@ -125,7 +125,11 @@ body::before {
   letter-spacing: 0.3px;
 }
 .badge-isro { background: rgba(63,185,80,0.12); border: 1px solid rgba(63,185,80,0.3); color: var(--accent-green); }
-.badge-v4   { background: rgba(88,166,255,0.12); border: 1px solid rgba(88,166,255,0.3); color: var(--accent-blue); }
+.badge-v5 {
+  background: rgba(147, 51, 234, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(147, 51, 234, 0.3);
+}
 
 /* ── Main Content ──────────────────────────────────────── */
 .main-content {
